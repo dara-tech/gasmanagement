@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Gas station building -->
+  <rect x="10" y="15" width="80" height="70" rx="5" fill="#1a1a1a" stroke="#ffffff" stroke-width="2"/>
+  <!-- Roof -->
+  <path d="M10 25 L50 10 L90 25 L90 30 L10 30 Z" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+  <!-- Windows -->
+  <rect x="20" y="40" width="15" height="15" rx="2" fill="#fbbf24" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="42" y="40" width="15" height="15" rx="2" fill="#fbbf24" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="64" y="40" width="15" height="15" rx="2" fill="#fbbf24" stroke="#ffffff" stroke-width="1.5"/>
+  <!-- Door -->
+  <rect x="42" y="60" width="16" height="25" rx="2" fill="#1a1a1a" stroke="#ffffff" stroke-width="2"/>
+  <!-- Fuel pump icon -->
+  <circle cx="70" cy="75" r="8" fill="#10b981" stroke="#ffffff" stroke-width="2"/>
+  <rect x="68" y="70" width="4" height="10" fill="#10b981"/>
+  <!-- Base -->
+  <rect x="8" y="82" width="84" height="8" fill="#374151" rx="2"/>
+</svg>
+

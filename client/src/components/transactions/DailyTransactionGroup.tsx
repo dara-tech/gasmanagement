@@ -2,7 +2,7 @@ import React from 'react';
 import { Transaction } from '../../services/api';
 import { TransactionTable } from './TransactionTable';
 import { TransactionCard } from './TransactionCard';
-import { Table, TableRow, TableCell } from '../ui/table';
+import { TableRow, TableCell } from '../ui/table';
 
 interface DailyTransactionGroupProps {
   date: string;
@@ -16,6 +16,10 @@ interface DailyTransactionGroupProps {
   dailySellingPrice: number;
   dailyDiscount: number;
   dailyProfit: number;
+  selectedIds?: Set<string>;
+  onSelectionChange?: (id: string, selected: boolean) => void;
+  onSelectAll?: (selected: boolean) => void;
+  currency?: 'USD' | 'KHR';
 }
 
 export const DailyTransactionGroup: React.FC<DailyTransactionGroupProps> = ({
@@ -30,6 +34,10 @@ export const DailyTransactionGroup: React.FC<DailyTransactionGroupProps> = ({
   dailySellingPrice,
   dailyDiscount,
   dailyProfit,
+  selectedIds = new Set(),
+  onSelectionChange,
+  onSelectAll,
+  currency = 'USD',
 }) => {
   return (
     <div className="last:mb-0 border-b last:border-b-0">
@@ -40,44 +48,44 @@ export const DailyTransactionGroup: React.FC<DailyTransactionGroupProps> = ({
 
       {/* Desktop: Table View */}
       <div className="hidden md:block overflow-x-auto">
-        <div className="relative">
-          <TransactionTable
-            transactions={transactions}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            formatCurrency={formatCurrency}
-          />
-          <Table>
-            <tfoot>
-              <TableRow className="bg-primary/5 hover:bg-primary/5">
-                <TableCell colSpan={2} className="font-semibold py-3">
-                  សរុបថ្ងៃនេះ: <span className="ml-2 px-2 py-0.5 bg-primary/20 rounded text-primary font-semibold">{transactions.length}</span>
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold py-3">
-                  {dailyLiters.toFixed(2)}
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold py-3 text-muted-foreground">
-                  {formatCurrency(dailyPurchasePrice)}
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold py-3">
-                  {formatCurrency(dailySellingPrice)}
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold py-3">
-                  {formatCurrency(dailyDiscount)}
-                </TableCell>
-                <TableCell className={`text-right font-mono font-semibold py-3 ${dailyProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCurrency(dailyProfit)}
-                </TableCell>
-                <TableCell className="text-right font-bold py-3">
-                  {formatCurrency(dailyTotal)}
-                </TableCell>
-                <TableCell className="py-3">
-                  {/* Empty - action column removed from summary */}
-                </TableCell>
-              </TableRow>
-            </tfoot>
-          </Table>
-        </div>
+        <TransactionTable
+          transactions={transactions}
+          onEdit={onEdit}
+          formatCurrency={formatCurrency}
+          selectedIds={selectedIds}
+          onSelectionChange={onSelectionChange}
+          onSelectAll={onSelectAll}
+          currency={currency}
+          footer={
+            <TableRow className="bg-primary/5 hover:bg-primary/5">
+              <TableCell className="w-[50px] text-center border-r"></TableCell>
+              <TableCell colSpan={2} className="font-semibold py-3 border-r">
+                សរុបថ្ងៃនេះ: <span className="ml-2 px-2 py-0.5 bg-primary/20 rounded text-primary font-semibold">{transactions.length}</span>
+              </TableCell>
+              <TableCell className="text-right w-[130px] font-mono font-semibold py-3 border-r">
+                {dailyLiters.toFixed(2)}
+              </TableCell>
+              <TableCell className="text-right w-[110px] font-mono font-semibold py-3 text-muted-foreground border-r">
+                {formatCurrency(dailyPurchasePrice)}
+              </TableCell>
+              <TableCell className="text-right w-[110px] font-mono font-semibold py-3 border-r">
+                {formatCurrency(dailySellingPrice)}
+              </TableCell>
+              <TableCell className="text-right w-[120px] font-mono font-semibold py-3 border-r">
+                {dailyDiscount > 0 ? formatCurrency(dailyDiscount) : '-'}
+              </TableCell>
+              <TableCell className={`text-right w-[110px] font-mono font-semibold py-3 border-r ${dailyProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(dailyProfit)}
+              </TableCell>
+              <TableCell className="text-right w-[120px] font-bold py-3 border-r">
+                {formatCurrency(dailyTotal)}
+              </TableCell>
+              <TableCell className="w-[60px] text-center py-3">
+                {/* Empty - action column removed from summary */}
+              </TableCell>
+            </TableRow>
+          }
+        />
       </div>
 
       {/* Mobile Card View */}
@@ -87,8 +95,10 @@ export const DailyTransactionGroup: React.FC<DailyTransactionGroupProps> = ({
             key={transaction._id}
             transaction={transaction}
             onEdit={onEdit}
-            onDelete={onDelete}
             formatCurrency={formatCurrency}
+            selected={selectedIds.has(transaction._id)}
+            onSelectionChange={onSelectionChange}
+            currency={currency}
           />
         ))}
       </div>
@@ -112,7 +122,7 @@ export const DailyTransactionGroup: React.FC<DailyTransactionGroupProps> = ({
             </div>
             <div>
               <span className="text-muted-foreground block mb-1 text-xs">បញ្ចុះតម្លៃ</span>
-              <span className="font-bold text-base font-mono">{formatCurrency(dailyDiscount)}</span>
+              <span className="font-bold text-base font-mono">{dailyDiscount > 0 ? formatCurrency(dailyDiscount) : '-'}</span>
             </div>
             <div>
               <span className="text-muted-foreground block mb-1 text-xs">ចំណេញ</span>

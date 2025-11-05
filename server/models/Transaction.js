@@ -52,11 +52,16 @@ const transactionSchema = new mongoose.Schema({
   },
   date: {
     type: Date,
-    default: Date.now
+    default: Date.now,
+    index: true // Index for faster date range queries
   }
 }, {
   timestamps: true
 });
+
+// Add compound indexes for common query patterns
+transactionSchema.index({ date: -1, pumpId: 1 });
+transactionSchema.index({ date: -1, fuelTypeId: 1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
 

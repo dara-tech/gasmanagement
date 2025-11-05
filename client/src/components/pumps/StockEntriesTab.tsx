@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { StockEntry } from '../../services/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent} from '../ui/card';
 import { Button } from '../ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Pagination } from '../ui/pagination';
 import { FiPlus, FiEdit2, FiTrash2 } from 'react-icons/fi';
 
 interface StockEntriesTabProps {
@@ -24,6 +25,27 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
   onDelete,
   formatDate,
 }) => {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  // Sort stock entries by date (newest first)
+  const sortedEntries = useMemo(() => {
+    return [...stockEntries].sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+  }, [stockEntries]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(sortedEntries.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedEntries = sortedEntries.slice(startIndex, endIndex);
+
+  // Reset to page 1 when items per page changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [itemsPerPage]);
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -48,10 +70,7 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
         </Card>
       ) : (
         <Card>
-          <CardHeader className="p-4 md:p-6">
-            <CardTitle className="text-base md:text-lg">ប្រវត្តិស្តុក</CardTitle>
-            <CardDescription className="text-xs md:text-sm">ការបន្ថែមស្តុកទាំងអស់</CardDescription>
-          </CardHeader>
+   
           <CardContent className="p-0">
             {stockEntries.length === 0 ? (
               <p className="text-muted-foreground p-6 text-center text-sm">
@@ -61,7 +80,7 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
               <>
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-2 p-2">
-                  {stockEntries.map((entry) => {
+                  {paginatedEntries.map((entry) => {
                     const pump = typeof entry.pumpId === 'object' ? entry.pumpId : null;
                     const fuelType = typeof entry.fuelTypeId === 'object' ? entry.fuelTypeId : null;
                     
@@ -98,10 +117,6 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
                           </div>
                           <div className="grid grid-cols-2 gap-2 pt-2 border-t">
                             <div>
-                              <p className="text-xs text-muted-foreground">តោន</p>
-                              <p className="font-mono text-sm font-semibold">{entry.tons.toFixed(2)}</p>
-                            </div>
-                            <div>
                               <p className="text-xs text-muted-foreground">លីត្រ</p>
                               <p className="font-mono text-sm font-semibold">{entry.liters.toFixed(2)}</p>
                             </div>
@@ -127,20 +142,19 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
                 {/* Desktop Table View */}
                 <div className="hidden md:block overflow-x-auto">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="bg-gradient-to-r from-blue-800 to-primary text-white">
                       <TableRow>
-                        <TableHead className="w-[100px]">ថ្ងៃ</TableHead>
-                        <TableHead className="w-[100px]">ស្តុកសាំង</TableHead>
-                        <TableHead>ប្រភេទសាំង</TableHead>
-                        <TableHead className="text-right w-[100px]">តោន</TableHead>
-                        <TableHead className="text-right w-[120px]">លីត្រ</TableHead>
-                        <TableHead className="text-right w-[120px]">តម្លៃ/លីត្រ</TableHead>
-                        <TableHead className="text-right w-[140px]">សរុប</TableHead>
-                        <TableHead className="w-[100px] text-center">សកម្មភាព</TableHead>
+                        <TableHead className="w-[100px] text-white">ថ្ងៃ</TableHead>
+                        <TableHead className="w-[100px] text-white">ស្តុកសាំង</TableHead>
+                        <TableHead className="text-white">ប្រភេទសាំង</TableHead>
+                        <TableHead className="text-right w-[120px] text-white">លីត្រ</TableHead>
+                        <TableHead className="text-right w-[120px] text-white">តម្លៃ/លីត្រ</TableHead>
+                        <TableHead className="text-right w-[140px] text-white">សរុប</TableHead>
+                        <TableHead className="w-[100px] text-center text-white">សកម្មភាព</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {stockEntries.map((entry) => {
+                      {paginatedEntries.map((entry) => {
                         const pump = typeof entry.pumpId === 'object' ? entry.pumpId : null;
                         const fuelType = typeof entry.fuelTypeId === 'object' ? entry.fuelTypeId : null;
                         
@@ -153,9 +167,6 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
                               {pump?.pumpNumber || 'N/A'}
                             </TableCell>
                             <TableCell>{fuelType?.name || 'N/A'}</TableCell>
-                            <TableCell className="text-right font-mono">
-                              {entry.tons.toFixed(2)}
-                            </TableCell>
                             <TableCell className="text-right font-mono">
                               {entry.liters.toFixed(2)}
                             </TableCell>
@@ -194,6 +205,21 @@ export const StockEntriesTab: React.FC<StockEntriesTabProps> = ({
                   </Table>
                 </div>
               </>
+            )}
+            
+            {/* Pagination */}
+            {sortedEntries.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={sortedEntries.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={setItemsPerPage}
+                itemsPerPageOptions={[10, 20, 50, 100]}
+                showItemsPerPage={true}
+                showFirstLast={true}
+              />
             )}
           </CardContent>
         </Card>

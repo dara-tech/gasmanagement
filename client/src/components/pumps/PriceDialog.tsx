@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo } from 'react';
 import { FuelType, FuelPriceHistory } from '../../services/api';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -7,8 +7,10 @@ import { Label } from '../ui/label';
 import { Card, CardContent } from '../ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { InlineLoading } from '../LoadingFallback';
-import { FiDollarSign, FiClock, FiCalendar } from 'react-icons/fi';
+import { FiDollarSign, FiClock, FiCalendar, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { formatPriceDisplay } from '../../utils/currency';
 
 // Lazy load Calendar component
 const Calendar = lazy(async () => {
@@ -28,13 +30,12 @@ interface PriceDialogProps {
   priceHistoryLoading: boolean;
   groupedPriceHistory: Record<string, FuelPriceHistory[]>;
   onDateChange: (date: string) => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, convertedPrice?: number) => void;
   onClose: () => void;
   getTodayDate: () => string;
   getDatesWithPrices: () => Date[];
   formatDateToLocalString: (date: Date) => string;
   createLocalDate: (dateStr: string) => Date;
-  formatDateShort: (dateString: string) => string;
 }
 
 export const PriceDialog: React.FC<PriceDialogProps> = ({
@@ -55,21 +56,103 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
   getDatesWithPrices,
   formatDateToLocalString,
   createLocalDate,
-  formatDateShort,
+
 }) => {
+  const [currency, setCurrency] = useState<'USD' | 'KHR'>('USD');
+  const [exchangeRate, setExchangeRate] = useState<string>(() => {
+    const saved = localStorage.getItem('exchangeRate');
+    return saved || '4000';
+  });
+
+  // Save exchange rate to localStorage when it changes
+  useEffect(() => {
+    if (exchangeRate) {
+      localStorage.setItem('exchangeRate', exchangeRate);
+    }
+  }, [exchangeRate]);
+
+  // Reset currency to USD when dialog opens (prices are stored in USD)
+  // Only reset when dialog opens, not when price changes (user might want to switch to KHR)
+  useEffect(() => {
+    if (open) {
+      setCurrency('USD');
+    }
+  }, [open]); // Only reset when dialog opens
+
+  // Pagination state for price history
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyItemsPerPage, setHistoryItemsPerPage] = useState(10);
+
+  // Get sorted and grouped price history
+  const sortedGroupedHistory = useMemo(() => {
+    const grouped = { ...groupedPriceHistory };
+    return Object.entries(grouped)
+      .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime());
+  }, [groupedPriceHistory]);
+
+  // Paginate the grouped history
+  const totalHistoryPages = Math.ceil(sortedGroupedHistory.length / historyItemsPerPage);
+  const startHistoryIndex = (historyPage - 1) * historyItemsPerPage;
+  const endHistoryIndex = startHistoryIndex + historyItemsPerPage;
+  const paginatedHistory = sortedGroupedHistory.slice(startHistoryIndex, endHistoryIndex);
+
+  // Reset to page 1 when items per page changes
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historyItemsPerPage]);
+
+  // Convert price when currency changes
+  const handleCurrencyChange = (newCurrency: 'USD' | 'KHR') => {
+    if (!priceFormData.price) {
+      setCurrency(newCurrency);
+      return;
+    }
+
+    const currentPrice = parseFloat(priceFormData.price) || 0;
+    const rate = parseFloat(exchangeRate) || 4000;
+
+    if (currency === 'USD' && newCurrency === 'KHR') {
+      // Convert USD to KHR
+      const rielPrice = currentPrice * rate;
+      onPriceFormDataChange({ ...priceFormData, price: rielPrice.toFixed(2) });
+    } else if (currency === 'KHR' && newCurrency === 'USD') {
+      // Convert KHR to USD
+      const usdPrice = currentPrice / rate;
+      onPriceFormDataChange({ ...priceFormData, price: usdPrice.toFixed(2) });
+    }
+    setCurrency(newCurrency);
+  };
+
+  // Calculate equivalent price in the other currency
+  const getEquivalentPrice = (): string => {
+    if (!priceFormData.price) return '0.00';
+    const currentPrice = parseFloat(priceFormData.price) || 0;
+    const rate = parseFloat(exchangeRate) || 4000;
+
+    if (currency === 'USD') {
+      const rielPrice = currentPrice * rate;
+      return rielPrice.toFixed(2);
+    } else {
+      const usdPrice = currentPrice / rate;
+      return usdPrice.toFixed(2);
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-full md:max-w-4xl mx-2 md:mx-auto max-h-[95vh] md:max-h-[90vh]">
-        <DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange} >
+      <DialogContent className="w-full md:max-w-2xl mx-2 md:mx-auto flex flex-col overflow-y-auto">
+        <div className="mb-4 flex-shrink-0">
+          <DialogHeader>
           <DialogTitle className="text-base md:text-xl font-bold">
             កំណត់តម្លៃ - {selectedFuelType?.name || 'Loading...'}
           </DialogTitle>
           <DialogDescription className="text-xs md:text-sm mt-1">
             កំណត់តម្លៃសម្រាប់ថ្ងៃជាក់លាក់ (តម្លៃអាចប្តូរតាមថ្ងៃ)
           </DialogDescription>
-        </DialogHeader>
+          </DialogHeader>
+        </div>
         
-        <Tabs defaultValue="set-price" className="w-full mt-4">
+        <Tabs defaultValue="set-price" className="w-full flex-1 flex flex-col min-h-0">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="set-price">
               {/* @ts-ignore */}
@@ -83,8 +166,53 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="set-price" className="space-y-4 md:space-y-6">
-            <form onSubmit={onSubmit}>
+          <TabsContent value="set-price" className="space-y-4 md:space-y-6 flex-1 overflow-y-auto">
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const priceValue = parseFloat(priceFormData.price) || 0;
+              
+              // Validate price range (USD: 0.1 - 10 per liter, KHR: 100 - 50000 per liter)
+              if (currency === 'USD') {
+                if (priceValue < 0.1 || priceValue > 10) {
+                  // Show validation error
+                  const errorMsg = 'តម្លៃត្រូវតែចន្លោះពី $0.10 ដល់ $10.00 ក្នុង ១ លីត្រ';
+                  window.alert(errorMsg);
+                  return;
+                }
+              } else if (currency === 'KHR') {
+                if (priceValue < 100 || priceValue > 50000) {
+                  const errorMsg = 'តម្លៃត្រូវតែចន្លោះពី ៛100 ដល់ ៛50,000 ក្នុង ១ លីត្រ';
+                  window.alert(errorMsg);
+                  return;
+                }
+              }
+              
+              // Convert price to USD before submitting if in KHR
+              let priceToSubmit = priceValue; // Default to current price
+              
+              if (currency === 'KHR' && priceFormData.price) {
+                const rielPrice = priceValue;
+                const rate = parseFloat(exchangeRate) || 4000;
+                const usdPrice = rielPrice / rate;
+                
+                // Validate converted USD price
+                if (usdPrice < 0.1 || usdPrice > 10) {
+                  const errorMsg = `តម្លៃបម្លែងទៅ USD: $${usdPrice.toFixed(2)} មិនត្រឹមត្រូវទេ។ សូមពិនិត្យតម្លៃឬអត្រាប្តូរប្រាក់។`;
+                  window.alert(errorMsg);
+                  return;
+                }
+                
+                // Update form data with USD price for display
+                const updatedFormData = { ...priceFormData, price: usdPrice.toFixed(2) };
+                onPriceFormDataChange(updatedFormData);
+                
+                // Use the converted USD price for submission
+                priceToSubmit = usdPrice;
+              }
+              
+              // Submit the form with the converted price (in USD)
+              onSubmit(e, priceToSubmit);
+            }}>
               {/* Mobile: Optimized Form Layout */}
               <div className="md:hidden space-y-5 py-2">
                 <div className="space-y-3">
@@ -164,14 +292,42 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                       </span>
                     )}
                   </div>
+                  
+                  {/* Currency Selection */}
+                  <div className="flex items-center gap-2">
+                    <Select value={currency} onValueChange={(value: 'USD' | 'KHR') => handleCurrencyChange(value)}>
+                      <SelectTrigger className="w-[100px] h-10">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                        <SelectItem value="KHR">KHR (៛)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    <div className="flex-1">
+
+                      <Input
+                        id="exchangeRate"
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={exchangeRate}
+                        onChange={(e) => setExchangeRate(e.target.value)}
+                        className="h-10 text-sm"
+                        placeholder="4000"
+                      />
+                    </div>
+                  </div>
+
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold">
-                      $
+                      {currency === 'USD' ? '$' : '៛'}
                     </div>
                     <Input
                       id="priceValue"
                       type="number"
-                      step="0.01"
+                      step={currency === 'USD' ? '0.01' : '1'}
                       min="0"
                       value={priceFormData.price}
                       onChange={(e) => {
@@ -188,6 +344,19 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                       </div>
                     )}
                   </div>
+                  
+                  {/* Show equivalent price */}
+                  {priceFormData.price && parseFloat(priceFormData.price) > 0 && (
+                    <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                      <span className="font-medium">
+                        {currency === 'USD' ? '៛' : '$'}{getEquivalentPrice()}
+                      </span>
+                      <span className="ml-1">
+                        {currency === 'USD' ? '(រៀល)' : '(ដុល្លារ)'}
+                      </span>
+                    </div>
+                  )}
+                  
                   {isUsingDefaultPrice && !loadingPrice && (
                     <p className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
                       💡 តម្លៃនេះគឺជាតម្លៃដើម។ កែប្រែតម្លៃនិងរក្សាទុកដើម្បីកំណត់តម្លៃសម្រាប់ថ្ងៃនេះ។
@@ -296,24 +465,68 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                             </Label>
                           </TableCell>
                           <TableCell className="py-3">
-                            <div className="relative">
-                              <Input
-                                id="priceValue-table"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={priceFormData.price}
-                                onChange={(e) => {
-                                  onPriceFormDataChange({ ...priceFormData, price: e.target.value });
-                                }}
-                                placeholder="0.00"
-                                required
-                                className="h-10 text-sm"
-                                disabled={loadingPrice}
-                              />
-                              {loadingPrice && (
-                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                            <div className="space-y-3">
+                              {/* Currency Selection */}
+                              <div className="flex items-center gap-2">
+                                <Select value={currency} onValueChange={(value: 'USD' | 'KHR') => handleCurrencyChange(value)}>
+                                  <SelectTrigger className="w-[120px] h-10">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="USD">USD ($)</SelectItem>
+                                    <SelectItem value="KHR">KHR (៛)</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                
+                                <div className="flex-1">
+
+                                  <Input
+                                    id="exchangeRate-table"
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    value={exchangeRate}
+                                    onChange={(e) => setExchangeRate(e.target.value)}
+                                    className="h-10 text-sm"
+                                    placeholder="4000"
+                                  />
+                                </div>
+                              </div>
+                              
+                              <div className="relative">
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold">
+                                  {currency === 'USD' ? '$' : '៛'}
+                                </div>
+                                <Input
+                                  id="priceValue-table"
+                                  type="number"
+                                  step={currency === 'USD' ? '0.01' : '1'}
+                                  min="0"
+                                  value={priceFormData.price}
+                                  onChange={(e) => {
+                                    onPriceFormDataChange({ ...priceFormData, price: e.target.value });
+                                  }}
+                                  placeholder="0.00"
+                                  required
+                                  className="h-10 text-sm pl-8"
+                                  disabled={loadingPrice}
+                                />
+                                {loadingPrice && (
+                                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* Show equivalent price */}
+                              {priceFormData.price && parseFloat(priceFormData.price) > 0 && (
+                                <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                                  <span className="font-medium">
+                                    {currency === 'USD' ? '៛' : '$'}{getEquivalentPrice()}
+                                  </span>
+                                  <span className="ml-1">
+                                    {currency === 'USD' ? '(រៀល)' : '(ដុល្លារ)'}
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -371,7 +584,7 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
             </form>
           </TabsContent>
 
-          <TabsContent value="history" className="space-y-4">
+          <TabsContent value="history" className="space-y-4 flex-1 flex flex-col min-h-0">
             {priceHistoryLoading ? (
               <div className="p-6 md:p-8 text-center text-muted-foreground">
                 <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent mx-auto mb-2"></div>
@@ -384,12 +597,10 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                 <p className="text-xs text-muted-foreground mt-2">តម្លៃដំបូងនឹងបង្ហាញនៅទីនេះ</p>
               </div>
             ) : (
-              <Card className="border-2">
-                <CardContent className="p-0">
-                  <div className="max-h-[60vh] md:max-h-[70vh] overflow-y-auto">
-                    {Object.entries(groupedPriceHistory)
-                      .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
-                      .map(([date, prices]) => (
+              <Card className="border-2 flex-1 flex flex-col min-h-0">
+                <CardContent className="p-0 flex-1 flex flex-col min-h-0">
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    {paginatedHistory.map(([date, prices]) => (
                         <div key={date} className="last:mb-0 border-b last:border-b-0">
                           <div className="bg-muted/50 p-3 md:p-5 border-b sticky top-0 z-10">
                             <div className="flex items-center gap-2">
@@ -423,7 +634,15 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                                         })}
                                       </TableCell>
                                       <TableCell className="text-right font-bold py-3">
-                                        ${price.price.toFixed(2)}
+                                        {(() => {
+                                          const { usd, riel } = formatPriceDisplay(price.price, parseFloat(exchangeRate));
+                                          return (
+                                            <div className="flex flex-col items-end">
+                                              <span>{usd}</span>
+                                              <span className="text-xs text-muted-foreground">({riel})</span>
+                                            </div>
+                                          );
+                                        })()}
                                       </TableCell>
                                       <TableCell className="py-3 text-muted-foreground">
                                         {price.notes || '-'}
@@ -461,8 +680,16 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                                       )}
                                     </div>
                                     <div className="text-right flex-shrink-0">
-                                      <p className="font-bold text-xl text-primary">${price.price.toFixed(2)}</p>
-                                      <p className="text-xs text-muted-foreground mt-0.5">/លីត្រ</p>
+                                      {(() => {
+                                        const { usd, riel } = formatPriceDisplay(price.price, parseFloat(exchangeRate));
+                                        return (
+                                          <>
+                                            <p className="font-bold text-xl text-primary">{usd}</p>
+                                            <p className="text-xs text-muted-foreground">{riel}</p>
+                                            <p className="text-xs text-muted-foreground mt-0.5">/លីត្រ</p>
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                 </div>
@@ -471,9 +698,98 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                         </div>
                       ))}
                   </div>
+                  
+                  {/* Custom Pagination for price history */}
+                 
                 </CardContent>
+
               </Card>
+              
             )}
+             {sortedGroupedHistory.length > 0 && (
+                    <div className="border-t flex-shrink-0 w-full bg-background p-4">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        {/* Items info and per page selector */}
+                        <div className="flex items-center gap-3">
+                        
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">បង្ហាញ:</span>
+                            <Select
+                              value={historyItemsPerPage?.toString() || '10'}
+                              onValueChange={(value) => setHistoryItemsPerPage(parseInt(value, 10))}
+                            >
+                              <SelectTrigger className="h-9 w-[80px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {[5, 10, 20, 50].map((option) => (
+                                  <SelectItem key={option} value={option.toString()}>
+                                    {option}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* Page navigation */}
+                        {totalHistoryPages > 1 && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 w-9 p-0"
+                              onClick={() => setHistoryPage(prev => Math.max(1, prev - 1))}
+                              disabled={historyPage === 1}
+                              title="មុន"
+                            >
+                              {/* @ts-ignore */}
+                              <FiChevronLeft className="h-4 w-4" />
+                            </Button>
+                            
+                            <div className="flex items-center gap-1">
+                              {Array.from({ length: Math.min(5, totalHistoryPages) }, (_, i) => {
+                                let pageNum: number;
+                                if (totalHistoryPages <= 5) {
+                                  pageNum = i + 1;
+                                } else if (historyPage <= 3) {
+                                  pageNum = i + 1;
+                                } else if (historyPage >= totalHistoryPages - 2) {
+                                  pageNum = totalHistoryPages - 4 + i;
+                                } else {
+                                  pageNum = historyPage - 2 + i;
+                                }
+                                
+                                return (
+                                  <Button
+                                    key={pageNum}
+                                    variant={historyPage === pageNum ? 'default' : 'outline'}
+                                    size="sm"
+                                    className={`h-9 min-w-[36px] px-3 ${historyPage === pageNum ? 'bg-primary text-primary-foreground' : ''}`}
+                                    onClick={() => setHistoryPage(pageNum)}
+                                  >
+                                    {pageNum}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 w-9 p-0"
+                              onClick={() => setHistoryPage(prev => Math.min(totalHistoryPages, prev + 1))}
+                              disabled={historyPage === totalHistoryPages}
+                              title="បន្ទាប់"
+                            >
+                              {/* @ts-ignore */}
+                              <FiChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
           </TabsContent>
         </Tabs>
       </DialogContent>

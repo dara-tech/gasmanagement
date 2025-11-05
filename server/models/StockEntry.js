@@ -11,11 +11,6 @@ const stockEntrySchema = new mongoose.Schema({
     ref: 'Pump',
     required: true
   },
-  tons: {
-    type: Number,
-    required: true,
-    min: 0
-  },
   liters: {
     type: Number,
     required: true,

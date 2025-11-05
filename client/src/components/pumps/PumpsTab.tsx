@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { FuelPumpIcon } from '../icons';
 import { FiEdit2, FiTrash2 } from 'react-icons/fi';
+import { formatPriceDisplay } from '../../utils/currency';
 
 interface PumpsTabProps {
   pumps: Pump[];
@@ -70,11 +71,15 @@ export const PumpsTab: React.FC<PumpsTabProps> = ({
                       </p>
                       {fuelType && (() => {
                         const currentPrice = currentPrices[fuelType._id] || 0;
-                        return currentPrice > 0 ? (
-                          <p className="text-sm">
-                            <span className="font-medium">តម្លៃ:</span> ${currentPrice.toFixed(2)} / {fuelType.unit}
-                          </p>
-                        ) : null;
+                        if (currentPrice > 0) {
+                          const { usd, riel } = formatPriceDisplay(currentPrice);
+                          return (
+                            <p className="text-sm">
+                              <span className="font-medium">តម្លៃ:</span> {usd} ({riel}) / {fuelType.unit}
+                            </p>
+                          );
+                        }
+                        return null;
                       })()}
                       <p className="text-sm">
                         <span className="font-medium">ស្តុក:</span>{' '}
@@ -116,14 +121,14 @@ export const PumpsTab: React.FC<PumpsTabProps> = ({
             <Card>
               <CardContent className="p-0">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-gradient-to-r from-blue-800 to-primary text-white">
                     <TableRow>
-                      <TableHead className="font-semibold w-[120px]">លេខស្តុក</TableHead>
-                      <TableHead className="font-semibold">ប្រភេទសាំង</TableHead>
-                      <TableHead className="text-center font-semibold w-[120px]">ស្ថានភាព</TableHead>
-                      <TableHead className="text-right font-semibold w-[120px]">តម្លៃ</TableHead>
-                      <TableHead className="text-right font-semibold w-[140px]">ស្តុក (លីត្រ)</TableHead>
-                      <TableHead className="w-[150px] text-center font-semibold">សកម្មភាព</TableHead>
+                      <TableHead className="font-semibold w-[120px] text-white">លេខស្តុក</TableHead>
+                      <TableHead className="font-semibold text-white">ប្រភេទសាំង</TableHead>
+                      <TableHead className="text-center font-semibold w-[120px] text-white">ស្ថានភាព</TableHead>
+                      <TableHead className="text-right font-semibold w-[120px] text-white">តម្លៃ</TableHead>
+                      <TableHead className="text-right font-semibold w-[140px] text-white">ស្តុក (លីត្រ)</TableHead>
+                      <TableHead className="w-[150px] text-center font-semibold text-white">សកម្មភាព</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -150,9 +155,16 @@ export const PumpsTab: React.FC<PumpsTabProps> = ({
                             {fuelType ? (
                               (() => {
                                 const currentPrice = currentPrices[fuelType._id] || 0;
-                                return currentPrice > 0 
-                                  ? `$${currentPrice.toFixed(2)}/${fuelType.unit}` 
-                                  : <span className="text-muted-foreground text-xs">កំណត់តាមរយៈ "កំណត់តម្លៃ"</span>;
+                                if (currentPrice > 0) {
+                                  const { usd, riel } = formatPriceDisplay(currentPrice);
+                                  return (
+                                    <div className="flex flex-col items-end">
+                                      <span>{usd}/{fuelType.unit}</span>
+                                      <span className="text-xs text-muted-foreground">({riel})</span>
+                                    </div>
+                                  );
+                                }
+                                return <span className="text-muted-foreground text-xs">កំណត់តាមរយៈ "កំណត់តម្លៃ"</span>;
                               })()
                             ) : '-'}
                           </TableCell>

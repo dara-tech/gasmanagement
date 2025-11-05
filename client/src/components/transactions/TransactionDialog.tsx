@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { Transaction, Pump } from '../../services/api';
+import { Transaction, Pump, fuelPricesAPI } from '../../services/api';
 import { useToast } from '../../hooks/use-toast';
 import { transactionsAPI } from '../../services/api';
 
@@ -42,6 +42,7 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
     discountType: 'amount' as 'amount' | 'percentage',
   });
   const [calculatedTotal, setCalculatedTotal] = useState(0);
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
 
   useEffect(() => {
     if (editingTransaction) {
@@ -54,6 +55,9 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         discountValue = percentage.toFixed(1);
       }
       
+      // Use the transaction's priceOut when editing
+      setCurrentPrice(editingTransaction.priceOut || editingTransaction.price || null);
+      
       setFormData({
         pumpId: pump?._id || '',
         liters: editingTransaction.liters.toString(),
@@ -61,7 +65,7 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         discount: discountValue,
         discountType: editingTransaction.discountType || 'amount',
       });
-      calculateTotal(pump?._id || '', editingTransaction.liters.toString());
+      calculateTotal(pump?._id || '', editingTransaction.liters.toString(), dateStr);
     } else {
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
@@ -73,12 +77,15 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         discountType: 'amount',
       });
       setCalculatedTotal(0);
+      setCurrentPrice(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingTransaction, open]);
 
-  const calculateTotal = (pumpId: string, liters: string) => {
+  const calculateTotal = async (pumpId: string, liters: string, date?: string) => {
     if (!pumpId || !liters) {
       setCalculatedTotal(0);
+      setCurrentPrice(null);
       return;
     }
 
@@ -88,20 +95,41 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
     }
 
     if (pump && typeof pump.fuelTypeId === 'object') {
-      const price = pump.fuelTypeId.price;
-      const total = parseFloat(liters) * (price || 0);
-      setCalculatedTotal(isNaN(total) ? 0 : total);
+      const fuelTypeId = pump.fuelTypeId._id;
+      const selectedDate = date || formData.date;
+      
+      try {
+        // Fetch price history for the selected date
+        const priceHistory = await fuelPricesAPI.getByDate(fuelTypeId, selectedDate);
+        const price = priceHistory.price || pump.fuelTypeId.price || 0;
+        setCurrentPrice(price);
+        const total = parseFloat(liters) * price;
+        setCalculatedTotal(isNaN(total) ? 0 : total);
+      } catch (error) {
+        // Fallback to default price if price history fetch fails
+        const price = pump.fuelTypeId.price || 0;
+        setCurrentPrice(price);
+        const total = parseFloat(liters) * price;
+        setCalculatedTotal(isNaN(total) ? 0 : total);
+      }
     }
   };
 
   const handlePumpChange = (pumpId: string) => {
     setFormData({ ...formData, pumpId });
-    calculateTotal(pumpId, formData.liters);
+    calculateTotal(pumpId, formData.liters, formData.date);
   };
 
   const handleLitersChange = (liters: string) => {
     setFormData({ ...formData, liters });
-    calculateTotal(formData.pumpId, liters);
+    calculateTotal(formData.pumpId, liters, formData.date);
+  };
+
+  const handleDateChange = (date: string) => {
+    setFormData({ ...formData, date });
+    if (formData.pumpId && formData.liters) {
+      calculateTotal(formData.pumpId, formData.liters, date);
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -111,8 +139,13 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
     }).format(amount);
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return; // Prevent double submission
+    
+    setSubmitting(true);
     try {
       const pumpList = editingTransaction ? allPumps : pumps;
       const pump = pumpList.find(p => p._id === formData.pumpId);
@@ -205,6 +238,8 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         title: 'កំហុស',
         description: errorMessage,
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -220,6 +255,7 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
       discountType: 'amount',
     });
     setCalculatedTotal(0);
+    setCurrentPrice(null);
   };
 
   return (
@@ -242,7 +278,7 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
                 id="date"
                 type="date"
                 value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                onChange={(e) => handleDateChange(e.target.value)}
                 max={getTodayDate()}
                 className="h-11 md:h-10 text-base md:text-sm"
                 required
@@ -353,6 +389,12 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
             {calculatedTotal > 0 && (
               <div className="p-4 bg-muted rounded-lg border">
                 <div className="space-y-3">
+                  {currentPrice !== null && formData.pumpId && (
+                    <div className="flex items-center justify-between text-xs text-muted-foreground pb-2 border-b">
+                      <span>តម្លៃសម្រាប់ថ្ងៃនេះ:</span>
+                      <span className="font-semibold">{formatCurrency(currentPrice)}/លីត្រ</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-sm md:text-base">សរុបមុនបញ្ចុះ:</span>
                     <span className="text-lg md:text-xl font-bold">
@@ -403,9 +445,17 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
             </Button>
             <Button 
               type="submit"
+              disabled={submitting}
               className="w-full sm:w-auto h-11 md:h-10 text-sm md:text-base"
             >
-              {editingTransaction ? 'រក្សាទុក' : 'បន្ថែម'}
+              {submitting ? (
+                <>
+                  <span className="mr-2 h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                  កំពុងរក្សាទុក...
+                </>
+              ) : (
+                editingTransaction ? 'រក្សាទុក' : 'បន្ថែម'
+              )}
             </Button>
           </DialogFooter>
         </form>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
-import { FiFile, FiX, FiZoomIn, FiZoomOut, FiMaximize2 } from 'react-icons/fi';
+import { FiFile } from 'react-icons/fi';
 
 interface PrintPreviewDialogProps {
   open: boolean;
@@ -19,7 +19,6 @@ export const PrintPreviewDialog: React.FC<PrintPreviewDialogProps> = ({
   onCancel,
 }) => {
   const [zoom, setZoom] = useState(1);
-  const [fitToWidth, setFitToWidth] = useState(true);
   const previewRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -37,32 +36,13 @@ export const PrintPreviewDialog: React.FC<PrintPreviewDialogProps> = ({
       const containerWidth = container.clientWidth - 48; // Account for padding
       
       const calculatedZoom = Math.min(containerWidth / a4WidthPx, 1);
-      if (fitToWidth) {
-        setZoom(calculatedZoom);
-      }
+      setZoom(calculatedZoom);
     };
 
     calculateFitZoom();
     window.addEventListener('resize', calculateFitZoom);
     return () => window.removeEventListener('resize', calculateFitZoom);
-  }, [open, fitToWidth, reportHTML]);
-
-
-
-  const handleZoomOut = () => {
-    setZoom(prev => Math.max(prev - 0.1, 0.5));
-    setFitToWidth(false);
-  };
-
-  const handleFitToWidth = () => {
-    setFitToWidth(true);
-    if (previewRef.current && containerRef.current) {
-      const container = containerRef.current;
-      const a4WidthPx = (210 / 25.4) * 96;
-      const containerWidth = container.clientWidth - 48;
-      setZoom(Math.min(containerWidth / a4WidthPx, 1));
-    }
-  };
+  }, [open, reportHTML]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} fullScreen>

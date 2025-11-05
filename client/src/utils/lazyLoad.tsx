@@ -1,4 +1,4 @@
-import React, { ComponentType, lazy, LazyExoticComponent } from 'react';
+import { ComponentType, lazy, LazyExoticComponent } from 'react';
 
 /**
  * Preload a lazy component before it's needed

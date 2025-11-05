@@ -1,27 +1,44 @@
 import React from 'react';
 import { Button } from '../ui/button';
-import { FiEdit2, FiTrash2 } from 'react-icons/fi';
+import { FiMoreVertical } from 'react-icons/fi';
 import { Transaction } from '../../services/api';
+import { formatPriceDisplay } from '../../utils/currency';
 
 interface TransactionCardProps {
   transaction: Transaction;
   onEdit: (transaction: Transaction) => void;
-  onDelete: (id: string) => void;
   formatCurrency: (amount: number) => string;
+  selected?: boolean;
+  onSelectionChange?: (id: string, selected: boolean) => void;
+  currency?: 'USD' | 'KHR';
 }
 
 export const TransactionCard: React.FC<TransactionCardProps> = ({
   transaction,
   onEdit,
-  onDelete,
   formatCurrency,
+  selected = false,
+  onSelectionChange,
+  currency = 'USD',
 }) => {
   const pump = typeof transaction.pumpId === 'object' ? transaction.pumpId : null;
   const fuelType = typeof transaction.fuelTypeId === 'object' ? transaction.fuelTypeId : null;
 
   return (
-    <div className="p-4 active:bg-accent transition-colors border-b last:border-b-0">
+    <div className={`p-4 active:bg-accent transition-colors border-b last:border-b-0 ${selected ? 'bg-primary/5' : ''}`}>
       <div className="flex items-start justify-between gap-3 mb-3">
+        {onSelectionChange && (
+          <div className="flex-shrink-0 pt-1">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(e) => onSelectionChange(transaction._id, e.target.checked)}
+              className="h-4 w-4 cursor-pointer"
+              aria-label={`ជ្រើសព័ត៌មាន ${pump?.pumpNumber || ''}`}
+              title={`ជ្រើសព័ត៌មាន ${pump?.pumpNumber || ''}`}
+            />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <span className="font-semibold text-base">{pump?.pumpNumber || 'N/A'}</span>
@@ -31,63 +48,92 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{transaction.liters.toFixed(2)} លីត្រ</span>
             <span>×</span>
-            <span className="font-medium">${(transaction.priceOut || transaction.price || 0).toFixed(2)}</span>
+            {(() => {
+              const price = transaction.priceOut || transaction.price || 0;
+              if (price > 0) {
+                const { primary } = formatPriceDisplay(price, undefined, currency);
+                return (
+                  <span className="font-medium">{primary}</span>
+                );
+              }
+              return <span className="font-medium">{currency === 'KHR' ? '៛0' : '$0.00'}</span>;
+            })()}
           </div>
         </div>
         <div className="text-right flex-shrink-0">
           <p className="font-bold text-lg mb-1">{formatCurrency(transaction.total)}</p>
-          {(transaction.profit || 0) !== 0 && (
-            <p className={`text-xs font-semibold ${(transaction.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ចំណេញ: ${(transaction.profit || 0).toFixed(2)}
-            </p>
-          )}
+          {(transaction.profit || 0) !== 0 && (() => {
+            const profit = transaction.profit || 0;
+            const { primary } = formatPriceDisplay(profit, undefined, currency);
+            return (
+              <p className={`text-xs font-semibold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                ចំណេញ: {primary}
+              </p>
+            );
+          })()}
         </div>
       </div>
       
       <div className="grid grid-cols-3 gap-3 text-xs mb-3 pt-3 border-t bg-muted/30 rounded-md p-2">
         <div>
           <span className="block mb-1 text-muted-foreground">តម្លៃទិញ</span>
-          <span className="font-semibold text-foreground">${(transaction.priceIn || 0).toFixed(2)}</span>
+          {(() => {
+            const price = transaction.priceIn || 0;
+            if (price > 0) {
+              const { primary } = formatPriceDisplay(price, undefined, currency);
+              return (
+                <span className="font-semibold text-foreground">{primary}</span>
+              );
+            }
+            return <span className="font-semibold text-foreground">{currency === 'KHR' ? '៛0' : '$0.00'}</span>;
+          })()}
         </div>
         <div>
           <span className="block mb-1 text-muted-foreground">បញ្ចុះ</span>
-          <span className="font-semibold text-foreground">
-            ${(transaction.discount || 0).toFixed(2)}
-            {transaction.discountType === 'percentage' && (
-              <span className="text-muted-foreground ml-1 font-normal">
-                ({((transaction.discount || 0) / ((transaction.total || 0) + (transaction.discount || 0)) * 100).toFixed(1)}%)
-              </span>
-            )}
-          </span>
+          {(() => {
+            const discount = transaction.discount || 0;
+            if (discount > 0) {
+              const { primary } = formatPriceDisplay(discount, undefined, currency);
+              return (
+                <span className="font-semibold text-foreground">
+                  {primary}
+                  {transaction.discountType === 'percentage' && (
+                    <span className="text-muted-foreground ml-1 font-normal">
+                      ({((discount) / ((transaction.total || 0) + discount) * 100).toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+              );
+            }
+            return <span className="font-semibold text-foreground">{currency === 'KHR' ? '៛0' : '$0.00'}</span>;
+          })()}
         </div>
         <div>
           <span className="block mb-1 text-muted-foreground">ចំណេញ</span>
-          <span className={`font-semibold ${(transaction.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            ${(transaction.profit || 0).toFixed(2)}
-          </span>
+          {(() => {
+            const profit = transaction.profit || 0;
+            if (profit !== 0) {
+              const { primary } = formatPriceDisplay(profit, undefined, currency);
+              return (
+                <span className={`font-semibold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{primary}</span>
+              );
+            }
+            return <span className="font-semibold text-foreground">{currency === 'KHR' ? '៛0' : '$0.00'}</span>;
+          })()}
         </div>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex justify-end">
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="flex-1 h-9 text-xs"
+          className="h-8 w-8 p-0"
           onClick={() => onEdit(transaction)}
+          aria-label="កែប្រែ"
+          title="កែប្រែ"
         >
           {/* @ts-ignore */}
-          <FiEdit2 className="h-3.5 w-3.5 mr-1.5" />
-          កែប្រែ
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 h-9 text-xs text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
-          onClick={() => onDelete(transaction._id)}
-        >
-          {/* @ts-ignore */}
-          <FiTrash2 className="h-3.5 w-3.5 mr-1.5" />
-          លុប
+          <FiMoreVertical className="h-4 w-4" />
         </Button>
       </div>
     </div>

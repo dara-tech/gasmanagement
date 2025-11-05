@@ -114,12 +114,12 @@ export const FuelTypesTab: React.FC<FuelTypesTabProps> = ({
         <Card>
           <CardContent className="p-0">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-gradient-to-r from-blue-800 to-primary text-white ">
                 <TableRow>
-                  <TableHead className="font-semibold">ឈ្មោះ</TableHead>
-                  <TableHead className="font-semibold">ឯកតា</TableHead>
-                  <TableHead className="text-right font-semibold">លីត្រ/តោន</TableHead>
-                  <TableHead className="w-[150px] text-center font-semibold">សកម្មភាព</TableHead>
+                  <TableHead className="font-semibold text-white">ឈ្មោះ</TableHead>
+                  <TableHead className="font-semibold text-white">ឯកតា</TableHead>
+                  <TableHead className="text-right font-semibold text-white">លីត្រ/តោន</TableHead>
+                  <TableHead className="w-[150px] text-center font-semibold text-white">សកម្មភាព</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

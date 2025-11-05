@@ -1,7 +1,6 @@
 import React, { Suspense } from 'react';
 import { createLazyComponent } from '../utils/lazyLoad';
 import { InlineLoading } from './LoadingFallback';
-import type { DayPickerProps } from 'react-day-picker';
 
 // Lazy load the Calendar component
 const Calendar = createLazyComponent(

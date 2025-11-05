@@ -83,97 +83,65 @@ const getDashboardStats = async (req, res) => {
     
     const { startDate, endDate } = getDateRange(period, customFrom, customTo);
 
-    // Get transactions for the selected period
+    // Use MongoDB aggregation for fast calculations - runs in database
+    const periodStats = await Transaction.aggregate([
+      {
+        $match: {
+          date: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$total' },
+          profit: { $sum: '$profit' },
+          liters: { $sum: '$liters' },
+          transactions: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Get all-time stats using aggregation (much faster than loading all documents)
+    const allTimeStats = await Transaction.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$total' },
+          profit: { $sum: '$profit' },
+          liters: { $sum: '$liters' },
+          transactions: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Get recent transactions for display (limit to 10)
     const periodTransactions = await Transaction.find({
       date: { $gte: startDate, $lte: endDate }
-    }).populate('pumpId').populate('fuelTypeId').sort({ date: -1 });
+    })
+      .populate('pumpId')
+      .populate('fuelTypeId')
+      .sort({ date: -1 })
+      .limit(10)
+      .lean(); // Use lean() for faster queries when we don't need Mongoose documents
 
-    // Calculate period stats - ensure all values are numbers
-    const periodTotal = periodTransactions.reduce((sum, t) => {
-      const total = Number(t.total) || 0;
-      return sum + total;
-    }, 0);
-    
-    // Calculate profit - always recalculate from actual values for accuracy
-    let periodProfit = 0;
-    for (const t of periodTransactions) {
-      const priceOut = Number(t.priceOut || t.price || 0);
-      let priceIn = Number(t.priceIn || 0);
-      const liters = Number(t.liters || 0);
-      const discount = Number(t.discount || 0);
-      
-      // Always calculate priceIn from stock entries for accuracy
-      if (priceOut > 0 && liters > 0) {
-        const pumpId = typeof t.pumpId === 'object' ? t.pumpId._id : t.pumpId;
-        const calculatedPriceIn = await calculateAverageCostPrice(pumpId, t.date);
-        // Use calculated priceIn if we got a value, otherwise use stored priceIn
-        if (calculatedPriceIn > 0) {
-          priceIn = calculatedPriceIn;
-        }
-      }
-      
-      // Always recalculate profit for accuracy: (priceOut - priceIn) * liters - discount
-      const profit = (priceOut - priceIn) * liters - discount;
-      periodProfit += profit;
-    }
-    
-    const periodLiters = periodTransactions.reduce((sum, t) => {
-      const liters = Number(t.liters) || 0;
-      return sum + liters;
-    }, 0);
-    
-    const periodTransactionsCount = periodTransactions.length;
-
-    // All-time stats (for comparison)
-    const allTransactions = await Transaction.find().populate('pumpId').populate('fuelTypeId');
-    
-    const allTimeTotal = allTransactions.reduce((sum, t) => {
-      const total = Number(t.total) || 0;
-      return sum + total;
-    }, 0);
-    
-    // Calculate all-time profit - always recalculate from actual values for accuracy
-    let allTimeProfit = 0;
-    for (const t of allTransactions) {
-      const priceOut = Number(t.priceOut || t.price || 0);
-      let priceIn = Number(t.priceIn || 0);
-      const liters = Number(t.liters || 0);
-      const discount = Number(t.discount || 0);
-      
-      // Always calculate priceIn from stock entries for accuracy
-      if (priceOut > 0 && liters > 0) {
-        const pumpId = typeof t.pumpId === 'object' ? t.pumpId._id : t.pumpId;
-        const calculatedPriceIn = await calculateAverageCostPrice(pumpId, t.date);
-        // Use calculated priceIn if we got a value, otherwise use stored priceIn
-        if (calculatedPriceIn > 0) {
-          priceIn = calculatedPriceIn;
-        }
-      }
-      
-      // Always recalculate profit for accuracy: (priceOut - priceIn) * liters - discount
-      const profit = (priceOut - priceIn) * liters - discount;
-      allTimeProfit += profit;
-    }
-    
-    const totalLiters = allTransactions.reduce((sum, t) => {
-      const liters = Number(t.liters) || 0;
-      return sum + liters;
-    }, 0);
+    // Extract stats from aggregation results
+    const periodData = periodStats[0] || { total: 0, profit: 0, liters: 0, transactions: 0 };
+    const allTimeData = allTimeStats[0] || { total: 0, profit: 0, liters: 0, transactions: 0 };
 
     res.json({
       period: {
-        total: Number(periodTotal.toFixed(2)),
-        profit: Number(periodProfit.toFixed(2)),
-        transactions: periodTransactionsCount,
-        liters: Number(periodLiters.toFixed(2))
+        total: Number(periodData.total.toFixed(2)),
+        profit: Number(periodData.profit.toFixed(2)),
+        transactions: periodData.transactions,
+        liters: Number(periodData.liters.toFixed(2))
       },
       allTime: {
-        total: Number(allTimeTotal.toFixed(2)),
-        profit: Number(allTimeProfit.toFixed(2)),
-        transactions: allTransactions.length,
-        liters: Number(totalLiters.toFixed(2))
+        total: Number(allTimeData.total.toFixed(2)),
+        profit: Number(allTimeData.profit.toFixed(2)),
+        transactions: allTimeData.transactions,
+        liters: Number(allTimeData.liters.toFixed(2))
       },
-      recentTransactions: periodTransactions.slice(0, 10),
+      recentTransactions: periodTransactions,
       periodType: period || 'daily',
       dateRange: {
         from: startDate.toISOString(),

@@ -10,24 +10,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { FiSearch, FiX } from 'react-icons/fi';
+import { FiSearch, FiX, FiCalendar, FiClock } from 'react-icons/fi';
 import { Pump } from '../../services/api';
+import { LazyCalendar } from '../LazyCalendar';
 
 interface TransactionFiltersProps {
   showFilters: boolean;
   onClose: () => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  filterDateFrom: string;
-  onDateFromChange: (value: string) => void;
-  filterDateTo: string;
-  onDateToChange: (value: string) => void;
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
+  onPeriodChange: (period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom') => void;
+  customDateRange: { from?: Date; to?: Date };
+  onCustomDateRangeChange: (range: { from?: Date; to?: Date }) => void;
   filterPump: string;
   onPumpChange: (value: string) => void;
   allPumps: Pump[];
   filteredCount: number;
   onClearFilters: () => void;
-  getTodayDate: () => string;
+  formatDate: (dateString: string) => string;
 }
 
 export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
@@ -35,20 +36,20 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
   onClose,
   searchQuery,
   onSearchChange,
-  filterDateFrom,
-  onDateFromChange,
-  filterDateTo,
-  onDateToChange,
+  period,
+  onPeriodChange,
+  customDateRange,
+  onCustomDateRangeChange,
   filterPump,
   onPumpChange,
   allPumps,
   filteredCount,
   onClearFilters,
-  getTodayDate,
+  formatDate,
 }) => {
   if (!showFilters) return null;
 
-  const hasActiveFilters = searchQuery || filterDateFrom || filterDateTo || (filterPump && filterPump !== 'all');
+  const hasActiveFilters = searchQuery || period !== 'daily' || (filterPump && filterPump !== 'all');
 
   return (
     <Card>
@@ -84,31 +85,124 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
           </div>
         </div>
 
-        {/* Date Range */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="dateFrom">ពីថ្ងៃ</Label>
-            <Input
-              id="dateFrom"
-              type="date"
-              value={filterDateFrom}
-              onChange={(e) => onDateFromChange(e.target.value)}
-              max={getTodayDate()}
-              className="h-11 md:h-10"
-            />
+        {/* Period Filter Section */}
+        <div className="space-y-4">
+          <Label className="text-base">រយៈពេល</Label>
+          
+          {/* Period Buttons */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Button
+              variant={period === 'daily' ? 'default' : 'outline'}
+              onClick={() => {
+                onPeriodChange('daily');
+                onCustomDateRangeChange({});
+              }}
+              className="h-11 md:h-10 text-sm"
+            >
+              {/* @ts-ignore */}
+              <FiCalendar className="mr-2 h-4 w-4" />
+              ថ្ងៃនេះ
+            </Button>
+            <Button
+              variant={period === 'weekly' ? 'default' : 'outline'}
+              onClick={() => {
+                onPeriodChange('weekly');
+                onCustomDateRangeChange({});
+              }}
+              className="h-11 md:h-10 text-sm"
+            >
+              {/* @ts-ignore */}
+              <FiCalendar className="mr-2 h-4 w-4" />
+              សប្តាហ៍នេះ
+            </Button>
+            <Button
+              variant={period === 'monthly' ? 'default' : 'outline'}
+              onClick={() => {
+                onPeriodChange('monthly');
+                onCustomDateRangeChange({});
+              }}
+              className="h-11 md:h-10 text-sm"
+            >
+              {/* @ts-ignore */}
+              <FiCalendar className="mr-2 h-4 w-4" />
+              ខែនេះ
+            </Button>
+            <Button
+              variant={period === 'yearly' ? 'default' : 'outline'}
+              onClick={() => {
+                onPeriodChange('yearly');
+                onCustomDateRangeChange({});
+              }}
+              className="h-11 md:h-10 text-sm"
+            >
+              {/* @ts-ignore */}
+              <FiCalendar className="mr-2 h-4 w-4" />
+              ឆ្នាំនេះ
+            </Button>
           </div>
+
+          {/* Custom Date Range */}
           <div className="space-y-2">
-            <Label htmlFor="dateTo">ដល់ថ្ងៃ</Label>
-            <Input
-              id="dateTo"
-              type="date"
-              value={filterDateTo}
-              onChange={(e) => onDateToChange(e.target.value)}
-              max={getTodayDate()}
-              min={filterDateFrom}
-              className="h-11 md:h-10"
-            />
+            <Button
+              variant={period === 'custom' ? 'default' : 'outline'}
+              onClick={() => onPeriodChange('custom')}
+              className="w-full h-11 md:h-10 text-sm"
+            >
+              {/* @ts-ignore */}
+              <FiCalendar className="mr-2 h-4 w-4" />
+              ជ្រើសរើសថ្ងៃផ្ទាល់ខ្លួន
+            </Button>
+            {period === 'custom' && (
+              <div className="pt-2">
+                <Label className="text-sm md:text-base mb-2 block">ជ្រើសរើសថ្ងៃ</Label>
+                <div className="flex justify-center">
+                  <LazyCalendar
+                    mode="range"
+                    selected={{
+                      from: customDateRange.from,
+                      to: customDateRange.to,
+                    }}
+                    onSelect={(range: { from?: Date; to?: Date } | undefined) => {
+                      onCustomDateRangeChange({
+                        from: range?.from,
+                        to: range?.to,
+                      });
+                    }}
+                    numberOfMonths={1}
+                    className="rounded-md border"
+                  />
+                </div>
+                {customDateRange.from && customDateRange.to && (
+                  <div className="mt-3 p-3 bg-muted rounded-md text-sm">
+                    <div className="flex items-center gap-2">
+                      {/* @ts-ignore */}
+                      <FiClock className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-muted-foreground">ពី:</span>
+                      <span className="font-medium">{formatDate(customDateRange.from.toISOString())}</span>
+                      <span className="text-muted-foreground ml-2">ដល់:</span>
+                      <span className="font-medium">{formatDate(customDateRange.to.toISOString())}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Period Info */}
+          {period !== 'custom' && (
+            <div className="p-3 bg-muted rounded-md text-sm">
+              <div className="flex items-center gap-2">
+                {/* @ts-ignore */}
+                <FiClock className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  {period === 'daily' && 'ថ្ងៃនេះ'}
+                  {period === 'weekly' && 'សប្តាហ៍នេះ (ច័ន្ទ - អាទិត្យ)'}
+                  {period === 'monthly' && 'ខែនេះ'}
+                  {period === 'yearly' && 'ឆ្នាំនេះ'}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pump Filter */}
@@ -154,4 +248,3 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     </Card>
   );
 };
-

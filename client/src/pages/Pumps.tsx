@@ -3,12 +3,12 @@ import { pumpsAPI, fuelTypesAPI, stockEntriesAPI, fuelPricesAPI, Pump, FuelType,
 import { useToast } from '../hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { createLazyComponent } from '../utils/lazyLoad';
-import { LoadingFallback } from '../components/LoadingFallback';
+import { InlineLoading } from '../components/LoadingFallback';
 
-// Lazy load pump components
-const FuelTypesTab = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.FuelTypesTab })), 'FuelTypesTab');
-const PumpsTab = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.PumpsTab })), 'PumpsTab');
-const StockEntriesTab = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.StockEntriesTab })), 'StockEntriesTab');
+// Eagerly load critical tab components (always visible)
+import { FuelTypesTab, PumpsTab, StockEntriesTab } from '../components/pumps';
+
+// Lazy load only dialogs (optional, only shown when user clicks)
 const PumpDialog = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.PumpDialog })), 'PumpDialog');
 const StockDialog = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.StockDialog })), 'StockDialog');
 const FuelTypeDialog = createLazyComponent(() => import('../components/pumps').then(m => ({ default: m.FuelTypeDialog })), 'FuelTypeDialog');
@@ -54,15 +54,15 @@ const Pumps: React.FC = () => {
   const [editingStockEntry, setEditingStockEntry] = useState<StockEntry | null>(null);
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
   const [stockEntryToDelete, setStockEntryToDelete] = useState<string | null>(null);
+  const [submittingStock, setSubmittingStock] = useState(false);
   const [stockFormData, setStockFormData] = useState({ 
     fuelTypeId: '', 
     pumpId: '',
-    tons: '',
+    liters: '',
     pricePerLiter: '',
     date: '',
     notes: ''
   });
-  const [calculatedLiters, setCalculatedLiters] = useState(0);
   const [calculatedTotalCost, setCalculatedTotalCost] = useState(0);
 
   // Fuel type management states
@@ -91,14 +91,15 @@ const Pumps: React.FC = () => {
 
   // Recalculate total cost when liters or price changes
   useEffect(() => {
-    if (calculatedLiters > 0 && stockFormData.pricePerLiter) {
+    if (stockFormData.liters && stockFormData.pricePerLiter) {
+      const liters = parseFloat(stockFormData.liters) || 0;
       const price = parseFloat(stockFormData.pricePerLiter) || 0;
-      const totalCost = calculatedLiters * price;
+      const totalCost = liters * price;
       setCalculatedTotalCost(isNaN(totalCost) ? 0 : totalCost);
     } else {
       setCalculatedTotalCost(0);
     }
-  }, [calculatedLiters, stockFormData.pricePerLiter]);
+  }, [stockFormData.liters, stockFormData.pricePerLiter]);
 
   // Fetch price history when fuel type is selected in price dialog
   useEffect(() => {
@@ -249,12 +250,11 @@ const Pumps: React.FC = () => {
       setStockFormData({
         fuelTypeId: fuelType?._id || '',
         pumpId: pump?._id || '',
-        tons: stockEntry.tons.toString(),
+        liters: stockEntry.liters.toString(),
         pricePerLiter: stockEntry.pricePerLiter?.toString() || '',
         date: dateStr,
         notes: stockEntry.notes || '',
       });
-      calculateLiters(fuelType?._id || '', stockEntry.tons.toString());
     } else {
       setEditingStockEntry(null);
       const now = new Date();
@@ -262,12 +262,11 @@ const Pumps: React.FC = () => {
       setStockFormData({ 
         fuelTypeId: '', 
         pumpId: '',
-        tons: '',
+        liters: '',
         pricePerLiter: '',
         date: dateStr,
         notes: ''
       });
-      setCalculatedLiters(0);
       setCalculatedTotalCost(0);
     }
     setStockDialogOpen(true);
@@ -281,64 +280,129 @@ const Pumps: React.FC = () => {
     setStockFormData({ 
       fuelTypeId: '', 
       pumpId: '',
-      tons: '',
+      liters: '',
       pricePerLiter: '',
       date: dateStr,
       notes: ''
     });
-    setCalculatedLiters(0);
     setCalculatedTotalCost(0);
   };
 
   const handleFuelTypeChange = (fuelTypeId: string) => {
-    setStockFormData({ ...stockFormData, fuelTypeId });
-    calculateLiters(fuelTypeId, stockFormData.tons);
+    // Update fuel type
+    const updatedFormData = { ...stockFormData, fuelTypeId };
+    
+    // Smart detection: Auto-select the first pump that uses this fuel type
+    // Only auto-select if no pump is currently selected or if the current pump doesn't match
+    if (!stockFormData.pumpId || stockFormData.pumpId === '') {
+      // Find pumps that use this fuel type
+      const matchingPumps = getPumpsUsingFuelType(fuelTypeId);
+      
+      // Auto-select the first matching pump (prefer active pumps)
+      const activePump = matchingPumps.find(pump => pump.status === 'active');
+      const pumpToSelect = activePump || matchingPumps[0];
+      
+      if (pumpToSelect) {
+        updatedFormData.pumpId = pumpToSelect._id;
+      }
+    } else {
+      // Check if currently selected pump matches the fuel type
+      const currentPump = pumps.find(p => p._id === stockFormData.pumpId);
+      if (currentPump) {
+        const pumpFuelTypeId = typeof currentPump.fuelTypeId === 'object' 
+          ? currentPump.fuelTypeId._id 
+          : currentPump.fuelTypeId;
+        
+        // If current pump doesn't match, auto-select a matching one
+        if (pumpFuelTypeId !== fuelTypeId) {
+          const matchingPumps = getPumpsUsingFuelType(fuelTypeId);
+          const activePump = matchingPumps.find(pump => pump.status === 'active');
+          const pumpToSelect = activePump || matchingPumps[0];
+          
+          if (pumpToSelect) {
+            updatedFormData.pumpId = pumpToSelect._id;
+          } else {
+            // No matching pump found, clear the selection
+            updatedFormData.pumpId = '';
+          }
+        }
+      }
+    }
+    
+    setStockFormData(updatedFormData);
   };
 
-  const handleTonsChange = (tons: string) => {
-    setStockFormData({ ...stockFormData, tons });
-    calculateLiters(stockFormData.fuelTypeId, tons);
+  const handleLitersChange = (liters: string) => {
+    setStockFormData({ ...stockFormData, liters });
   };
 
   const handlePriceChange = (price: string) => {
     setStockFormData({ ...stockFormData, pricePerLiter: price });
   };
 
-  const calculateLiters = (fuelTypeId: string, tons: string) => {
-    if (!fuelTypeId || !tons) {
-      setCalculatedLiters(0);
-      return;
-    }
-
-    const fuelType = fuelTypes.find(ft => ft._id === fuelTypeId);
-    if (fuelType) {
-      const litersPerTon = fuelType.litersPerTon || 1390;
-      const liters = parseFloat(tons) * litersPerTon;
-      setCalculatedLiters(isNaN(liters) ? 0 : liters);
-    }
-  };
-
 
   const handleStockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingStock) return; // Prevent double submission
+    
+    setSubmittingStock(true);
+    
+    // Optimistic update: Update pump stock immediately for better UX
+    const pump = pumps.find(p => p._id === stockFormData.pumpId);
+    
+    if (pump && !editingStockEntry) {
+      const litersValue = parseFloat(stockFormData.liters) || 0;
+      // Optimistically update pump stock
+      setPumps(prevPumps => prevPumps.map(p => 
+        p._id === pump._id 
+          ? { ...p, stockLiters: (p.stockLiters || 0) + litersValue }
+          : p
+      ));
+    }
+    
     try {
-      const tons = parseFloat(stockFormData.tons);
-      const pricePerLiter = parseFloat(stockFormData.pricePerLiter);
+      // Validate and convert to numbers - ensure we have valid inputs
+      // Double-check that values are not empty or invalid
+      const litersStr = stockFormData.liters?.trim() || '';
+      const priceStr = stockFormData.pricePerLiter?.trim() || '';
       
-      if (isNaN(tons) || tons <= 0) {
+      if (!litersStr || litersStr === '') {
         toast({
           variant: 'destructive',
           title: 'កំហុស',
-          description: 'សូមបញ្ចូលបរិមាណតោនដែលត្រឹមត្រូវ',
+          description: 'សូមបញ្ចូលបរិមាណលីត្រ',
+        });
+        return;
+      }
+      
+      if (!priceStr || priceStr === '') {
+        toast({
+          variant: 'destructive',
+          title: 'កំហុស',
+          description: 'សូមបញ្ចូលតម្លៃទិញ',
+        });
+        return;
+      }
+      
+      // Parse and validate numbers
+      const liters = parseFloat(litersStr);
+      const pricePerLiter = parseFloat(priceStr);
+      
+      // Strict validation - ensure they are actual numbers, not NaN
+      if (typeof liters !== 'number' || isNaN(liters) || liters <= 0 || !isFinite(liters)) {
+        toast({
+          variant: 'destructive',
+          title: 'កំហុស',
+          description: 'សូមបញ្ចូលបរិមាណលីត្រដែលត្រឹមត្រូវ (ត្រូវការលេខធំជាង ០)',
         });
         return;
       }
 
-      if (isNaN(pricePerLiter) || pricePerLiter <= 0) {
+      if (typeof pricePerLiter !== 'number' || isNaN(pricePerLiter) || pricePerLiter < 0 || !isFinite(pricePerLiter)) {
         toast({
           variant: 'destructive',
           title: 'កំហុស',
-          description: 'សូមបញ្ចូលតម្លៃទិញដែលត្រឹមត្រូវ',
+          description: 'សូមបញ្ចូលតម្លៃទិញដែលត្រឹមត្រូវ (ត្រូវការលេខធំជាងឬស្មើ ០)',
         });
         return;
       }
@@ -356,24 +420,28 @@ const Pumps: React.FC = () => {
         ? new Date(`${stockFormData.date}T12:00:00`)
         : new Date();
 
+      // liters and pricePerLiter are already validated numbers from above
+      // Create data object with proper types - ensuring numbers are explicitly typed
+      const stockData: {
+        fuelTypeId: string;
+        pumpId: string;
+        liters: number;
+        pricePerLiter: number;
+        date: string;
+        notes: string;
+      } = {
+        fuelTypeId: String(stockFormData.fuelTypeId).trim(),
+        pumpId: String(stockFormData.pumpId).trim(),
+        liters: Number(liters), // Explicitly ensure number type
+        pricePerLiter: Number(pricePerLiter), // Explicitly ensure number type
+        date: stockDate.toISOString(),
+        notes: (stockFormData.notes || '').trim()
+      };
+
       if (editingStockEntry) {
-        await stockEntriesAPI.update(editingStockEntry._id, {
-          fuelTypeId: stockFormData.fuelTypeId,
-          pumpId: stockFormData.pumpId,
-          tons: tons,
-          pricePerLiter: pricePerLiter,
-          date: stockDate.toISOString(),
-          notes: stockFormData.notes,
-        });
+        await stockEntriesAPI.update(editingStockEntry._id, stockData);
       } else {
-        await stockEntriesAPI.create({
-          fuelTypeId: stockFormData.fuelTypeId,
-          pumpId: stockFormData.pumpId,
-          tons: tons,
-          pricePerLiter: pricePerLiter,
-          date: stockDate.toISOString(),
-          notes: stockFormData.notes,
-        });
+        await stockEntriesAPI.create(stockData);
       }
       handleCloseStockDialog();
       fetchData();
@@ -383,13 +451,45 @@ const Pumps: React.FC = () => {
         description: editingStockEntry ? 'កែប្រែស្តុកដោយជោគជ័យ' : 'បន្ថែមស្តុកដោយជោគជ័យ',
       });
     } catch (error: any) {
-      console.error('Error saving stock entry:', error);
-      const errorMessage = error?.response?.data?.message || 'មានកំហុសក្នុងការរក្សាទុក';
+      // Get detailed error message
+      let errorMessage = 'មានកំហុសក្នុងការរក្សាទុក';
+      const errorData = error?.response?.data;
+      
+      if (errorData) {
+        // Check for validation errors object
+        if (errorData.errors && typeof errorData.errors === 'object') {
+          const errorList = Object.entries(errorData.errors)
+            .map(([field, msg]) => `${field}: ${msg}`)
+            .join(', ');
+          errorMessage = errorList || errorData.message || errorMessage;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.validationError) {
+          errorMessage = errorData.validationError;
+        } else if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         variant: 'destructive',
         title: 'កំហុស',
         description: errorMessage,
       });
+      
+      // Revert optimistic update on error
+      if (pump && !editingStockEntry) {
+        const litersValue = parseFloat(stockFormData.liters) || 0;
+        setPumps(prevPumps => prevPumps.map(p => 
+          p._id === pump._id 
+            ? { ...p, stockLiters: Math.max(0, (p.stockLiters || 0) - litersValue) }
+            : p
+        ));
+      }
+    } finally {
+      setSubmittingStock(false);
     }
   };
 
@@ -401,11 +501,33 @@ const Pumps: React.FC = () => {
   const handleStockDelete = async () => {
     if (!stockEntryToDelete) return;
     
+    // Find the stock entry to delete for optimistic update
+    const stockEntry = stockEntries.find(se => se._id === stockEntryToDelete);
+    const pump = stockEntry && typeof stockEntry.pumpId === 'object' 
+      ? pumps.find(p => p._id === stockEntry.pumpId._id)
+      : null;
+    
+    // Optimistic update: Remove from list and update pump stock immediately
+    if (stockEntry && pump) {
+      const litersToRestore = stockEntry.liters;
+      // Remove from list immediately
+      setStockEntries(prev => prev.filter(se => se._id !== stockEntryToDelete));
+      // Optimistically restore pump stock
+      setPumps(prevPumps => prevPumps.map(p => 
+        p._id === pump._id 
+          ? { ...p, stockLiters: Math.max(0, (p.stockLiters || 0) - litersToRestore) }
+          : p
+      ));
+    }
+    
+    setStockDeleteDialogOpen(false);
+    const entryIdToDelete = stockEntryToDelete;
+    setStockEntryToDelete(null);
+    
     try {
-      await stockEntriesAPI.delete(stockEntryToDelete);
-      fetchData();
-      setStockDeleteDialogOpen(false);
-      setStockEntryToDelete(null);
+      await stockEntriesAPI.delete(entryIdToDelete);
+      // Refresh to get accurate data
+      await fetchData();
       toast({
         variant: 'success',
         title: 'ជោគជ័យ',
@@ -413,6 +535,20 @@ const Pumps: React.FC = () => {
       });
     } catch (error) {
       console.error('Error deleting stock entry:', error);
+      // Revert optimistic update on error
+      if (stockEntry) {
+        setStockEntries(prev => [...prev, stockEntry].sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        ));
+      }
+      if (pump && stockEntry) {
+        const litersToRestore = stockEntry.liters;
+        setPumps(prevPumps => prevPumps.map(p => 
+          p._id === pump._id 
+            ? { ...p, stockLiters: (p.stockLiters || 0) + litersToRestore }
+            : p
+        ));
+      }
       toast({
         variant: 'destructive',
         title: 'កំហុស',
@@ -423,11 +559,10 @@ const Pumps: React.FC = () => {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('km-KH', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric' 
-    });
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const getTodayDate = () => {
@@ -643,26 +778,43 @@ const Pumps: React.FC = () => {
     setPriceHistory([]);
   };
 
-  const handlePriceSubmit = async (e: React.FormEvent) => {
+  const handlePriceSubmit = async (e: React.FormEvent, convertedPrice?: number) => {
     e.preventDefault();
     if (!selectedFuelType) return;
 
+    // Use the converted price if provided, otherwise use priceFormData.price
+    // The PriceDialog component converts KHR to USD and passes it directly
+    const priceToSave = convertedPrice !== undefined ? convertedPrice : parseFloat(priceFormData.price);
     const savedDate = priceFormData.date;
-    const savedPrice = priceFormData.price;
+
+    if (isNaN(priceToSave) || priceToSave <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'កំហុស',
+        description: 'សូមបញ្ចូលតម្លៃដែលត្រឹមត្រូវ',
+      });
+      return;
+    }
 
     try {
       await fuelPricesAPI.setPriceForDate(selectedFuelType._id, {
-        price: parseFloat(priceFormData.price),
+        price: priceToSave, // Already in USD (converted if needed)
         date: priceFormData.date,
         notes: priceFormData.notes
       });
       
-      const dateStr = savedDate ? new Date(savedDate).toLocaleDateString('km-KH') : '';
+      const dateStr = savedDate ? (() => {
+        const date = new Date(savedDate);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+      })() : '';
       toast({
         variant: 'success',
         title: 'ជោគជ័យ',
         description: dateStr 
-          ? `$${parseFloat(savedPrice).toFixed(2)} សម្រាប់ថ្ងៃ ${dateStr} ដោយជោគជ័យ`
+          ? `$${priceToSave.toFixed(2)} សម្រាប់ថ្ងៃ ${dateStr} ដោយជោគជ័យ`
           : 'កំណត់តម្លៃដោយជោគជ័យ',
       });
       
@@ -720,11 +872,10 @@ const Pumps: React.FC = () => {
 
   const formatDateShort = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('km-KH', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric' 
-    });
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const groupedPriceHistory = priceHistory.reduce((acc, price) => {
@@ -737,7 +888,9 @@ const Pumps: React.FC = () => {
   }, {} as Record<string, FuelPriceHistory[]>);
 
   if (loading) {
-    return <div className="p-4 md:p-6">កំពុងផ្ទុក...</div>;
+    return <div className="p-4 md:p-6 min-h-screen flex items-center justify-center">
+      <InlineLoading message="កំពុងផ្ទុកស្តុកសាំង..." />
+    </div>;
   }
 
   return (
@@ -748,26 +901,25 @@ const Pumps: React.FC = () => {
           <p className="text-xs md:text-base text-muted-foreground mt-0.5">គ្រប់គ្រងស្តុកសាំង និងបន្ថែមស្តុក</p>
         </div>
       </div>
-
       <Tabs defaultValue="fuel-types" className="w-full">
         <TabsList className="grid w-full grid-cols-3 mb-3 md:mb-4 h-auto gap-0.5 md:gap-1">
           <TabsTrigger 
             value="fuel-types" 
-            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0"
+            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0 data-[state=active]:bg-primary data-[state=active]:text-white"
           >
             <span className="hidden sm:inline">ប្រភេទសាំង</span>
             <span className="sm:hidden">ប្រភេទ</span>
           </TabsTrigger>
           <TabsTrigger 
             value="pumps" 
-            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0"
+            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0 data-[state=active]:bg-primary data-[state=active]:text-white"
           >
             <span className="hidden sm:inline">គ្រប់គ្រងស្តុកសាំង</span>
             <span className="sm:hidden">ស្តុក</span>
           </TabsTrigger>
           <TabsTrigger 
             value="stock" 
-            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0"
+            className="text-[11px] sm:text-xs md:text-sm lg:text-base py-2 md:py-1.5 px-1 sm:px-2 md:px-3 whitespace-nowrap overflow-hidden text-ellipsis min-h-[2.75rem] md:min-h-0 data-[state=active]:bg-primary data-[state=active]:text-white"
           >
             <span className="hidden sm:inline">បន្ថែមស្តុក</span>
             <span className="sm:hidden">បន្ថែម</span>
@@ -776,8 +928,7 @@ const Pumps: React.FC = () => {
 
         {/* Tab 1: Fuel Types */}
         <TabsContent value="fuel-types" className="space-y-4">
-          <Suspense fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
-            <FuelTypesTab
+          <FuelTypesTab
               fuelTypes={fuelTypes}
               pumps={pumps}
               onAdd={() => handleOpenFuelTypeDialog()}
@@ -787,13 +938,11 @@ const Pumps: React.FC = () => {
               isFuelTypeInUse={isFuelTypeInUse}
               getPumpsUsingFuelType={getPumpsUsingFuelType}
             />
-          </Suspense>
         </TabsContent>
 
         {/* Tab 1: Pump Management */}
         <TabsContent value="pumps" className="space-y-4">
-          <Suspense fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
-            <PumpsTab
+          <PumpsTab
               pumps={pumps}
               fuelTypes={fuelTypes}
               currentPrices={currentPrices}
@@ -801,13 +950,11 @@ const Pumps: React.FC = () => {
               onEdit={handleOpenPumpDialog}
               onDelete={handlePumpDeleteClick}
             />
-          </Suspense>
         </TabsContent>
 
         {/* Tab 2: Stock Entries */}
         <TabsContent value="stock" className="space-y-4">
-          <Suspense fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
-            <StockEntriesTab
+          <StockEntriesTab
               stockEntries={stockEntries}
               pumps={pumps}
               fuelTypes={fuelTypes}
@@ -816,7 +963,6 @@ const Pumps: React.FC = () => {
               onDelete={handleStockDeleteClick}
               formatDate={formatDate}
             />
-          </Suspense>
         </TabsContent>
       </Tabs>
 
@@ -857,16 +1003,16 @@ const Pumps: React.FC = () => {
           editingStockEntry={editingStockEntry}
           fuelTypes={fuelTypes}
           pumps={pumps}
-          formData={stockFormData}
-          calculatedLiters={calculatedLiters}
-          calculatedTotalCost={calculatedTotalCost}
-          onFormDataChange={setStockFormData}
-          onFuelTypeChange={handleFuelTypeChange}
-          onTonsChange={handleTonsChange}
-          onPriceChange={handlePriceChange}
+        formData={stockFormData}
+        calculatedTotalCost={calculatedTotalCost}
+        onFormDataChange={setStockFormData}
+        onFuelTypeChange={handleFuelTypeChange}
+        onLitersChange={handleLitersChange}
+        onPriceChange={handlePriceChange}
           onSubmit={handleStockSubmit}
           onClose={handleCloseStockDialog}
           getTodayDate={getTodayDate}
+          submitting={submittingStock}
         />
       </Suspense>
 
@@ -968,7 +1114,6 @@ const Pumps: React.FC = () => {
           getDatesWithPrices={getDatesWithPrices}
           formatDateToLocalString={formatDateToLocalString}
           createLocalDate={createLocalDate}
-          formatDateShort={formatDateShort}
         />
       </Suspense>
     </div>

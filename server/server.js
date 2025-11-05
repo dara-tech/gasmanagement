@@ -35,7 +35,6 @@ const corsOptions = {
         callback(null, true);
       } else {
         callback(null, true); // Allow all in production if no specific origins set
-        console.log('CORS: Allowing origin:', origin);
       }
     } else {
       // In development, allow all
@@ -104,19 +103,17 @@ app.get('/api/health', (req, res) => {
 const autoReload = () => {
   const https = require('https');
   
-  // Use SERVER_URL or construct from Render environment
-  const serverUrl = process.env.SERVER_URL || 
-    process.env.RENDER_EXTERNAL_URL || 
-    `https://${process.env.RENDER_SERVICE_NAME || 'your-service-name'}.onrender.com`;
+  // Use the specific Render URL
+  const serverUrl = process.env.SERVER_URL || 'https://gasmanagement.onrender.com';
   
   const healthUrl = `${serverUrl}/api/health`;
   
   https.get(healthUrl, (res) => {
-    console.log(`✅ Auto-reload ping successful: ${res.statusCode}`);
+    // Auto-reload ping successful (silent)
   }).on("error", (err) => {
-    console.log(`⚠️ Auto-reload ping failed: ${err.message}`);
+    // Auto-reload ping failed (silent)
   }).on("timeout", () => {
-    console.log(`⚠️ Auto-reload ping timed out`);
+    // Auto-reload ping timed out (silent)
   }).setTimeout(10000);
 };
 
@@ -129,7 +126,13 @@ server.listen(PORT, () => {
   // Start auto-reload pings (only in production)
   if (process.env.NODE_ENV === 'production') {
     console.log('🚀 Starting auto-reload pings every 14 minutes...');
-    setInterval(autoReload, 14 * 60 * 1000); // 14 minutes
+    
+    // Send first ping after 1 minute to ensure server is ready
+    setTimeout(() => {
+      autoReload();
+      // Then set up regular interval
+      setInterval(autoReload, 14 * 60 * 1000); // 14 minutes
+    }, 60000); // 1 minute delay
   }
 });
 

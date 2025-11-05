@@ -1,19 +1,24 @@
-import React, { useEffect, useState, useRef, useCallback, Suspense } from 'react';
-import { transactionsAPI, pumpsAPI, Transaction, Pump, PaginatedTransactionsResponse } from '../services/api';
+import React, { useEffect, useState, Suspense } from 'react';
+import { transactionsAPI, pumpsAPI, Transaction, Pump } from '../services/api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { useToast } from '../hooks/use-toast';
-import { FiSearch, FiFileText } from 'react-icons/fi';
+import { FiSearch, FiFileText, FiTrash2 } from 'react-icons/fi';
 import { ReceiptIcon, FuelPumpIcon } from '../components/icons';
 import { createLazyComponent } from '../utils/lazyLoad';
-import { LoadingFallback } from '../components/LoadingFallback';
+import { InlineLoading, LoadingFallback } from '../components/LoadingFallback';
+import { Pagination } from '../components/ui/pagination';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { getExchangeRate, usdToRiel } from '../utils/currency';
 
-// Lazy load transaction components
+// Eagerly load critical components (always needed)
+import { DailyTransactionGroup } from '../components/transactions';
+
+// Lazy load only dialogs and optional components
 const TransactionFilters = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.TransactionFilters })), 'TransactionFilters');
 const TransactionDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.TransactionDialog })), 'TransactionDialog');
 const DeleteTransactionDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.DeleteTransactionDialog })), 'DeleteTransactionDialog');
 const ReportDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.ReportDialog })), 'ReportDialog');
-const DailyTransactionGroup = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.DailyTransactionGroup })), 'DailyTransactionGroup');
 const PrintPreviewDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.PrintPreviewDialog })), 'PrintPreviewDialog');
 
 const Transactions: React.FC = () => {
@@ -22,7 +27,8 @@ const Transactions: React.FC = () => {
   const [pumps, setPumps] = useState<Pump[]>([]);
   const [allPumps, setAllPumps] = useState<Pump[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [pagination, setPagination] = useState<{ page: number; limit: number; total: number; totalPages: number; hasMore: boolean } | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -37,65 +43,75 @@ const Transactions: React.FC = () => {
   
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'>('daily');
+  const [customDateRange, setCustomDateRange] = useState<{ from?: Date; to?: Date }>({});
   const [filterPump, setFilterPump] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Intersection Observer ref for infinite scroll
-  const observerTarget = useRef<HTMLDivElement>(null);
+  // Bulk selection states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+
+  // Currency state
+  const [currency, setCurrency] = useState<'USD' | 'KHR'>(() => {
+    const saved = localStorage.getItem('transactionCurrency');
+    return (saved === 'KHR' || saved === 'USD') ? saved : 'USD';
+  });
+
+  // Save currency preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('transactionCurrency', currency);
+  }, [currency]);
 
   useEffect(() => {
-    fetchData();
+    fetchData(currentPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset and fetch data when filters change
   useEffect(() => {
-    if (!loading) {
-      fetchData(1, false);
+    // Only fetch if not custom period or if custom period has both dates
+    if (period !== 'custom' || (customDateRange.from && customDateRange.to)) {
+      setCurrentPage(1);
+      fetchData(1);
+      // Clear selection when filters change
+      setSelectedIds(new Set());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterDateFrom, filterDateTo, filterPump]);
+  }, [period, customDateRange, filterPump]);
 
-  const fetchData = async (page: number = 1, append: boolean = false) => {
+  // Fetch data when page or items per page changes
+  useEffect(() => {
+    if (currentPage > 0) {
+      fetchData(currentPage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage]);
+
+  const fetchData = async (page: number = 1) => {
     try {
-      if (!append) {
-        setLoading(true);
-      } else {
-        setLoadingMore(true);
-      }
+      setLoading(true);
 
       const filters: { startDate?: string; endDate?: string; pumpId?: string } = {};
-      if (filterDateFrom) filters.startDate = filterDateFrom;
-      if (filterDateTo) filters.endDate = filterDateTo;
-      if (filterPump && filterPump !== 'all') filters.pumpId = filterPump;
-
-      let response: PaginatedTransactionsResponse;
-      try {
-        response = await transactionsAPI.getPaginated(page, 50, filters);
-      } catch (apiError: any) {
-        console.error('API call failed:', apiError);
-        // If it's a network error or 401, show error but still render the component
-        if (apiError?.response?.status === 401) {
-          // Token might be invalid, redirect to login
-          localStorage.removeItem('token');
-          window.location.href = '/login';
-          return;
-        }
-        throw apiError; // Re-throw to be caught by outer catch
+      
+      // Calculate date range based on period (same logic as Dashboard)
+      if (period === 'custom' && customDateRange.from && customDateRange.to) {
+        filters.startDate = customDateRange.from.toISOString().split('T')[0];
+        filters.endDate = customDateRange.to.toISOString().split('T')[0];
+      } else {
+        const range = getDateRange(period);
+        filters.startDate = range.startDate.toISOString().split('T')[0];
+        filters.endDate = range.endDate.toISOString().split('T')[0];
       }
       
-      // Debug logging
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Transactions API Response:', response);
-      }
+      if (filterPump && filterPump !== 'all') filters.pumpId = filterPump;
+
+      const response = await transactionsAPI.getPaginated(page, itemsPerPage, filters);
       
       // Ensure response has the expected structure
       if (!response || !response.transactions) {
         console.error('Invalid API response:', response);
-        if (!append) {
-          setTransactions([]);
-        }
+        setTransactions([]);
         toast({
           variant: 'destructive',
           title: 'កំហុស',
@@ -104,17 +120,7 @@ const Transactions: React.FC = () => {
         return;
       }
       
-      // Debug: log transaction count
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`Loaded ${response.transactions.length} transactions (page ${page}, total: ${response.pagination?.total || 0})`);
-      }
-      
-      if (append) {
-        setTransactions(prev => [...(prev || []), ...(response.transactions || [])]);
-      } else {
-        setTransactions(response.transactions || []);
-      }
-      
+      setTransactions(response.transactions || []);
       setPagination(response.pagination || null);
 
       // Fetch pumps only on initial load
@@ -137,43 +143,21 @@ const Transactions: React.FC = () => {
         description: errorMessage,
       });
       // Ensure transactions is always an array, even on error
-      if (!append) {
-        setTransactions([]);
-      }
+      setTransactions([]);
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
   };
 
-  const loadMore = useCallback(() => {
-    if (!loadingMore && pagination?.hasMore) {
-      fetchData(pagination.page + 1, true);
-    }
-  }, [loadingMore, pagination]);
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-  // Intersection Observer for infinite scroll
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && pagination?.hasMore && !loadingMore) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    const currentTarget = observerTarget.current;
-    if (currentTarget) {
-      observer.observe(currentTarget);
-    }
-
-    return () => {
-      if (currentTarget) {
-        observer.unobserve(currentTarget);
-      }
-    };
-  }, [pagination, loadingMore, loadMore]);
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1);
+  };
 
   const handleOpenDialog = (transaction?: Transaction) => {
     setEditingTransaction(transaction || null);
@@ -181,7 +165,8 @@ const Transactions: React.FC = () => {
   };
 
   const handleDialogSuccess = () => {
-    fetchData(1, false);
+    setCurrentPage(1);
+    fetchData(1);
   };
 
   const handleDeleteClick = (id: string) => {
@@ -192,11 +177,29 @@ const Transactions: React.FC = () => {
   const handleDelete = async () => {
     if (!transactionToDelete) return;
     
+    // Find the transaction to delete for optimistic update
+    const transaction = transactions.find(t => t._id === transactionToDelete);
+    
+    // Optimistic update: Remove from list immediately
+    if (transaction) {
+      setTransactions(prev => prev.filter(t => t._id !== transactionToDelete));
+      setPagination(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : null);
+      // Remove from selected if it was selected
+      setSelectedIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(transactionToDelete);
+        return newSet;
+      });
+    }
+    
+    setDeleteDialogOpen(false);
+    const transactionIdToDelete = transactionToDelete;
+    setTransactionToDelete(null);
+    
     try {
-      await transactionsAPI.delete(transactionToDelete);
-      fetchData(1, false);
-      setDeleteDialogOpen(false);
-      setTransactionToDelete(null);
+      await transactionsAPI.delete(transactionIdToDelete);
+      // Refresh to get accurate data
+      await fetchData(currentPage);
       toast({
         variant: 'success',
         title: 'ជោគជ័យ',
@@ -204,6 +207,96 @@ const Transactions: React.FC = () => {
       });
     } catch (error) {
       console.error('Error deleting transaction:', error);
+      // Revert optimistic update on error
+      if (transaction) {
+        setTransactions(prev => [...prev, transaction].sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        ));
+        setPagination(prev => prev ? { ...prev, total: prev.total + 1 } : null);
+        // Restore selection if it was selected
+        setSelectedIds(prev => {
+          const newSet = new Set(prev);
+          newSet.add(transactionIdToDelete);
+          return newSet;
+        });
+      }
+      toast({
+        variant: 'destructive',
+        title: 'កំហុស',
+        description: 'មានកំហុសក្នុងការលុប',
+      });
+    }
+  };
+
+  // Handle selection change
+  const handleSelectionChange = (id: string, selected: boolean) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (selected) {
+        newSet.add(id);
+      } else {
+        newSet.delete(id);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle select all in a group
+  const handleSelectAll = (selected: boolean, transactionIds: string[]) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (selected) {
+        transactionIds.forEach(id => newSet.add(id));
+      } else {
+        transactionIds.forEach(id => newSet.delete(id));
+      }
+      return newSet;
+    });
+  };
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+
+    const idsToDelete = Array.from(selectedIds);
+    const transactionsToDelete = transactions.filter(t => idsToDelete.includes(t._id));
+    
+    // Optimistic update: Remove selected transactions from list immediately
+    setTransactions(prev => prev.filter(t => !idsToDelete.includes(t._id)));
+    setPagination(prev => prev ? { 
+      ...prev, 
+      total: Math.max(0, prev.total - idsToDelete.length) 
+    } : null);
+    
+    // Clear selection and close dialog
+    setSelectedIds(new Set());
+    setBulkDeleteDialogOpen(false);
+    
+    try {
+      // Delete all selected transactions
+      await Promise.all(idsToDelete.map(id => transactionsAPI.delete(id)));
+      
+      // Refresh data to get accurate state
+      setCurrentPage(1);
+      await fetchData(1);
+      
+      toast({
+        variant: 'success',
+        title: 'ជោគជ័យ',
+        description: `លុបព័ត៌មាន ${idsToDelete.length} ដោយជោគជ័យ`,
+      });
+    } catch (error) {
+      console.error('Error bulk deleting transactions:', error);
+      // Revert optimistic update on error
+      setTransactions(prev => [...prev, ...transactionsToDelete].sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      ));
+      setPagination(prev => prev ? { 
+        ...prev, 
+        total: prev.total + idsToDelete.length 
+      } : null);
+      // Restore selection
+      setSelectedIds(new Set(idsToDelete));
       toast({
         variant: 'destructive',
         title: 'កំហុស',
@@ -213,6 +306,13 @@ const Transactions: React.FC = () => {
   };
 
   const formatCurrency = (amount: number) => {
+    if (currency === 'KHR') {
+      const rate = getExchangeRate();
+      const rielAmount = usdToRiel(amount, rate);
+      // Format with thousand separators
+      const formatted = rielAmount.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      return `៛${formatted}`;
+    }
     return new Intl.NumberFormat('km-KH', {
       style: 'currency',
       currency: 'USD',
@@ -220,16 +320,19 @@ const Transactions: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('km-KH');
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const formatDateShort = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('km-KH', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric' 
-    });
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const formatTime = (dateString: string) => {
@@ -244,7 +347,6 @@ const Transactions: React.FC = () => {
   const filteredTransactions = (transactions || []).filter((transaction) => {
     const pump = typeof transaction.pumpId === 'object' ? transaction.pumpId : null;
     const fuelType = typeof transaction.fuelTypeId === 'object' ? transaction.fuelTypeId : null;
-    const transactionDate = new Date(transaction.date);
     
     // Search filter
     if (searchQuery) {
@@ -258,18 +360,8 @@ const Transactions: React.FC = () => {
       }
     }
     
-    // Date range filter
-    if (filterDateFrom) {
-      const fromDate = new Date(filterDateFrom);
-      fromDate.setHours(0, 0, 0, 0);
-      if (transactionDate < fromDate) return false;
-    }
-    
-    if (filterDateTo) {
-      const toDate = new Date(filterDateTo);
-      toDate.setHours(23, 59, 59, 999);
-      if (transactionDate > toDate) return false;
-    }
+    // Date range filter - filter is now handled by API, but keep client-side for search
+    // The API already filters by date range, so this is mainly for search results
     
     // Pump filter
     if (filterPump && filterPump !== 'all' && pump?._id !== filterPump) {
@@ -487,36 +579,35 @@ const Transactions: React.FC = () => {
     };
 
     // Create CSV content with summary and detailed transactions
-    const summaryHeaders = ['Metric', 'Value'];
     const summaryRows = [
-      ['Period', `${periodNames[reportPeriod]} Report (${periodLabels[reportPeriod]})`],
-      ['Date Range', `${formatDateShort(startDate.toISOString())} - ${formatDateShort(endDate.toISOString())}`],
+      ['រយៈពេល', `${periodNames[reportPeriod]} Report (${periodLabels[reportPeriod]})`],
+      ['ចាប់ពីដល់', `${formatDateShort(startDate.toISOString())} - ${formatDateShort(endDate.toISOString())}`],
       ['', ''],
-      ['SUMMARY', ''],
-      ['Total Transactions', metrics.transactionCount.toString()],
-      ['Total Sales (Revenue)', `$${metrics.totalSales.toFixed(2)}`],
-      ['Total Cost', `$${metrics.totalCost.toFixed(2)}`],
-      ['Total Profit', `$${metrics.totalProfit.toFixed(2)}`],
-      ['Profit Margin', `${metrics.profitMargin.toFixed(2)}%`],
-      ['Total Liters Sold', `${metrics.totalLiters.toFixed(2)} L`],
-      ['Total Discounts', `$${metrics.totalDiscounts.toFixed(2)}`],
-      ['Average Transaction Value', `$${metrics.avgTransactionValue.toFixed(2)}`],
+      ['សង្ខេប', ''],
+      ['ចំនួនព័ត៌មាន', metrics.transactionCount.toString()],
+      ['សរុបលក់', `$${metrics.totalSales.toFixed(2)}`],
+      ['សរុបទិញ', `$${metrics.totalCost.toFixed(2)}`],
+      ['សរុបចំណេញ', `$${metrics.totalProfit.toFixed(2)}`],
+      ['ចំណេញ%', `${metrics.profitMargin.toFixed(2)}%`],
+      ['សរុបលីត្រ', `${metrics.totalLiters.toFixed(2)} L`],
+      ['សរុបបញ្ចុះ', `$${metrics.totalDiscounts.toFixed(2)}`],
+      ['មធ្យម', `$${metrics.avgTransactionValue.toFixed(2)}`],
       ['', ''],
-      ['DETAILED TRANSACTIONS', ''],
+      ['ព័ត៌មានលម្អិត', ''],
     ];
 
     // Transaction details
     const transactionHeaders = [
-      'Date',
-      'Time',
-      'Pump',
-      'Fuel Type',
-      'Liters',
-      'Price In',
-      'Price Out',
-      'Discount',
-      'Profit',
-      'Total'
+      'ថ្ងៃ',
+      'ម៉ោង',
+      'ស្តុក',
+      'ប្រភេទ',
+      'លីត្រ',
+      'តម្លៃទិញ',
+      'តម្លៃលក់',
+      'បញ្ចុះតម្លៃ',
+      'ចំណេញ',
+      'សរុប'
     ];
 
     const transactionRows = periodTransactions
@@ -834,7 +925,7 @@ const Transactions: React.FC = () => {
           <div class="info-section">
             <p><strong>ចាប់ពី:</strong> ${formatDateShort(startDate.toISOString())}</p>
             <p><strong>រហូតដល់:</strong> ${formatDateShort(endDate.toISOString())}</p>
-            <p><strong>កាលបរិច្ឆេទបង្កើត:</strong> ${new Date().toLocaleDateString('km-KH')}</p>
+            <p><strong>កាលបរិច្ឆេទបង្កើត:</strong> ${formatDateShort(new Date().toISOString())}</p>
           </div>
           
           <div class="summary">
@@ -884,9 +975,9 @@ const Transactions: React.FC = () => {
                   <th>ស្តុក</th>
                   <th>ប្រភេទ</th>
                   <th class="text-right">លីត្រ</th>
-                  <th class="text-right">ទិញ</th>
-                  <th class="text-right">លក់</th>
-                  <th class="text-right">បញ្ចុះ</th>
+                  <th class="text-right">តម្លៃទិញ</th>
+                  <th class="text-right">តម្លៃលក់</th>
+                  <th class="text-right">បញ្ចុះតម្លៃ</th>
                   <th class="text-right">ចំណេញ</th>
                   <th class="text-right">សរុប</th>
                 </tr>
@@ -1009,8 +1100,8 @@ const Transactions: React.FC = () => {
   // Clear all filters
   const clearFilters = () => {
     setSearchQuery('');
-    setFilterDateFrom('');
-    setFilterDateTo('');
+    setPeriod('daily');
+    setCustomDateRange({});
     setFilterPump('all');
   };
 
@@ -1021,17 +1112,51 @@ const Transactions: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="p-4 md:p-6">កំពុងផ្ទុក...</div>;
+    return <div className="p-4 md:p-6 min-h-screen flex items-center justify-center">
+      <InlineLoading message="កំពុងផ្ទុកព័ត៌មានលក់..." />
+    </div>;
   }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6 pb-24 md:pb-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-xl md:text-3xl font-bold">ព័ត៌មានលក់</h1>
-          <p className="text-xs md:text-base text-muted-foreground mt-0.5">គ្រប់គ្រងព័ត៌មានលក់សាំង</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl md:text-3xl font-bold">ព័ត៌មានលក់</h1>
+            <p className="text-xs md:text-base text-muted-foreground mt-0.5">គ្រប់គ្រងព័ត៌មានលក់សាំង</p>
+          </div>
+          {/* Currency Selector */}
+          <Select value={currency} onValueChange={(value: 'USD' | 'KHR') => setCurrency(value)}>
+            <SelectTrigger className="w-[100px] h-9 md:h-10 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="USD">USD ($)</SelectItem>
+              <SelectItem value="KHR">KHR (៛)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          {selectedIds.size > 0 && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setSelectedIds(new Set())}
+                className="h-11 md:h-10 text-sm md:text-base"
+              >
+                លុបការជ្រើស
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => setBulkDeleteDialogOpen(true)}
+                className="h-11 md:h-10 text-sm md:text-base"
+              >
+                {/* @ts-ignore */}
+                <FiTrash2 className="mr-2 h-4 w-4" />
+                លុប ({selectedIds.size})
+              </Button>
+            </>
+          )}
           <Button 
             variant="outline"
             onClick={() => setShowFilters(!showFilters)}
@@ -1068,22 +1193,25 @@ const Transactions: React.FC = () => {
 
       {/* Search and Filter Panel */}
       {showFilters && (
-        <Suspense fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
+        <Suspense fallback={null}>
           <TransactionFilters
             showFilters={showFilters}
             onClose={() => setShowFilters(false)}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            filterDateFrom={filterDateFrom}
-            onDateFromChange={setFilterDateFrom}
-            filterDateTo={filterDateTo}
-            onDateToChange={setFilterDateTo}
+            period={period}
+            onPeriodChange={(p: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom') => {
+              setPeriod(p);
+              if (p !== 'custom') setCustomDateRange({});
+            }}
+            customDateRange={customDateRange}
+            onCustomDateRangeChange={setCustomDateRange}
             filterPump={filterPump}
             onPumpChange={setFilterPump}
             allPumps={allPumps}
             filteredCount={filteredTransactions.length}
             onClearFilters={clearFilters}
-            getTodayDate={getTodayDate}
+            formatDate={formatDate}
           />
         </Suspense>
       )}
@@ -1142,97 +1270,117 @@ const Transactions: React.FC = () => {
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                   
                   return (
-                    <Suspense key={date} fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
-                      <DailyTransactionGroup
-                        date={date}
-                        transactions={sortedTransactions}
-                        onEdit={handleOpenDialog}
-                        onDelete={handleDeleteClick}
-                        formatCurrency={formatCurrency}
-                        dailyTotal={dailyTotal}
-                        dailyLiters={dailyLiters}
-                        dailyPurchasePrice={dailyPurchasePrice}
-                        dailySellingPrice={dailySellingPrice}
-                        dailyDiscount={dailyDiscount}
-                        dailyProfit={dailyProfit}
-                      />
-                    </Suspense>
+                    <DailyTransactionGroup
+                      key={date}
+                      date={date}
+                      transactions={sortedTransactions}
+                      onEdit={handleOpenDialog}
+                      onDelete={handleDeleteClick}
+                      formatCurrency={formatCurrency}
+                      dailyTotal={dailyTotal}
+                      dailyLiters={dailyLiters}
+                      dailyPurchasePrice={dailyPurchasePrice}
+                      dailySellingPrice={dailySellingPrice}
+                      dailyDiscount={dailyDiscount}
+                      dailyProfit={dailyProfit}
+                      selectedIds={selectedIds}
+                      onSelectionChange={handleSelectionChange}
+                      onSelectAll={(selected: boolean) => handleSelectAll(selected, sortedTransactions.map(t => t._id))}
+                    />
                   );
                 })}
             </div>
           )}
           
-          {/* Infinite Scroll Loading Indicator */}
-          {pagination?.hasMore && (
-            <div ref={observerTarget} className="flex items-center justify-center p-4 md:p-6 min-h-[100px]">
-              {loadingMore && (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="h-8 w-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-                  <p className="text-sm text-muted-foreground">កំពុងផ្ទុកព័ត៌មានបន្ថែម...</p>
-                </div>
-              )}
-            </div>
-          )}
-          
-          {/* End of list indicator */}
-          {!pagination?.hasMore && (transactions || []).length > 0 && (
-            <div className="flex items-center justify-center p-4 md:p-6 border-t">
-              <p className="text-sm text-muted-foreground">
-                បានបង្ហាញទាំងអស់ {(transactions || []).length} / {pagination?.total || (transactions || []).length} ព័ត៌មាន
-              </p>
+          {/* Pagination */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="border-t p-4 md:p-6">
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.total}
+                itemsPerPage={itemsPerPage}
+                onPageChange={handlePageChange}
+                onItemsPerPageChange={handleItemsPerPageChange}
+                itemsPerPageOptions={[25, 50, 100, 200]}
+                showItemsPerPage={true}
+                showFirstLast={true}
+              />
             </div>
           )}
         </CardContent>
       </Card>
-      <Suspense fallback={null}>
-        <TransactionDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          editingTransaction={editingTransaction}
-          pumps={pumps}
-          allPumps={allPumps}
-          onSuccess={handleDialogSuccess}
-          getTodayDate={getTodayDate}
-        />
-      </Suspense>
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <TransactionDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            editingTransaction={editingTransaction}
+            pumps={pumps}
+            allPumps={allPumps}
+            onSuccess={handleDialogSuccess}
+            getTodayDate={getTodayDate}
+          />
+        </Suspense>
+      )}
 
-      <Suspense fallback={null}>
-        <DeleteTransactionDialog
-          open={deleteDialogOpen}
-          onOpenChange={(open) => {
-            setDeleteDialogOpen(open);
-            if (!open) setTransactionToDelete(null);
-          }}
-          onConfirm={handleDelete}
-        />
-      </Suspense>
+      {deleteDialogOpen && (
+        <Suspense fallback={null}>
+          <DeleteTransactionDialog
+            open={deleteDialogOpen}
+            onOpenChange={(open) => {
+              setDeleteDialogOpen(open);
+              if (!open) setTransactionToDelete(null);
+            }}
+            onConfirm={handleDelete}
+          />
+        </Suspense>
+      )}
 
-      <Suspense fallback={null}>
-        <ReportDialog
-          open={reportDialogOpen}
-          onOpenChange={setReportDialogOpen}
-          reportPeriod={reportPeriod}
-          onPeriodChange={(period) => {
-            setReportPeriod(period);
-            if (period !== 'custom') setReportDateRange({});
-          }}
-          reportDateRange={reportDateRange}
-          onDateRangeChange={setReportDateRange}
-          onGenerateCSV={generateReport}
-          onGeneratePDF={generatePDFReportPreview}
-          formatDateShort={formatDateShort}
-        />
-      </Suspense>
+      {/* Bulk Delete Dialog */}
+      {bulkDeleteDialogOpen && (
+        <Suspense fallback={<LoadingFallback message="កំពុងផ្ទុក..." />}>
+          <DeleteTransactionDialog
+            open={bulkDeleteDialogOpen}
+            onOpenChange={(open) => {
+              setBulkDeleteDialogOpen(open);
+            }}
+            onConfirm={handleBulkDelete}
+            count={selectedIds.size}
+          />
+        </Suspense>
+      )}
 
-      <Suspense fallback={null}>
-        <PrintPreviewDialog
-          open={previewDialogOpen}
-          onOpenChange={setPreviewDialogOpen}
-          reportHTML={previewHTML}
-          onConfirm={handlePreviewConfirm}
-          onCancel={handlePreviewCancel}
-        />
-      </Suspense>
+      {reportDialogOpen && (
+        <Suspense fallback={null}>
+          <ReportDialog
+            open={reportDialogOpen}
+            onOpenChange={setReportDialogOpen}
+            reportPeriod={reportPeriod}
+            onPeriodChange={(period) => {
+              setReportPeriod(period);
+              if (period !== 'custom') setReportDateRange({});
+            }}
+            reportDateRange={reportDateRange}
+            onDateRangeChange={setReportDateRange}
+            onGenerateCSV={generateReport}
+            onGeneratePDF={generatePDFReportPreview}
+            formatDateShort={formatDateShort}
+          />
+        </Suspense>
+      )}
+
+      {previewDialogOpen && (
+        <Suspense fallback={null}>
+          <PrintPreviewDialog
+            open={previewDialogOpen}
+            onOpenChange={setPreviewDialogOpen}
+            reportHTML={previewHTML}
+            onConfirm={handlePreviewConfirm}
+            onCancel={handlePreviewCancel}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

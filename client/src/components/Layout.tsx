@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { FiLogOut } from 'react-icons/fi';
-import { GasStationIcon, FuelDropletIcon, FuelPumpIcon, ReceiptIcon } from './icons';
+import { GasStationIcon, FuelPumpIcon, ReceiptIcon } from './icons';
 import { prefetchRoute, prefetchCriticalRoutes } from '../utils/prefetch';
 
 interface LayoutProps {

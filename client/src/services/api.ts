@@ -1,6 +1,45 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+// Get API URL from environment variable or use appropriate default
+const getApiUrl = () => {
+  let url: string;
+  
+  // If REACT_APP_API_URL is set, use it
+  if (process.env.REACT_APP_API_URL) {
+    url = process.env.REACT_APP_API_URL.trim();
+    
+    // Validate that URL has a protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      // If it looks like it's missing protocol, add http://
+      if (url.includes('://')) {
+        // Already has some protocol, but it's not http/https - this is an error
+        console.error('❌ REACT_APP_API_URL has invalid protocol:', url);
+        console.warn('⚠️ Falling back to default API URL');
+        return process.env.NODE_ENV === 'production' 
+          ? 'https://gasmanagement.onrender.com/api'
+          : 'http://localhost:5001/api';
+      } else {
+        // Missing protocol entirely, add http:// automatically (silently fix)
+        url = `http://${url}`;
+      }
+    }
+    
+    return url;
+  }
+  
+  // In production (Netlify), we should have REACT_APP_API_URL set
+  // If not set in production, log a warning
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('⚠️ REACT_APP_API_URL not set! Please configure it in Netlify environment variables.');
+    // Return a placeholder that will fail gracefully
+    return 'https://gasmanagement.onrender.com/api';
+  }
+  
+  // Development fallback
+  return 'http://localhost:5001/api';
+};
+
+const API_URL = getApiUrl();
 
 const api = axios.create({
   baseURL: API_URL,
@@ -17,6 +56,22 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Handle 401 errors globally (unauthorized)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid - clear it and redirect to login
+      localStorage.removeItem('token');
+      // Only redirect if we're not already on the login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 export interface FuelType {
   _id: string;
@@ -53,7 +108,6 @@ export interface StockEntry {
   _id: string;
   fuelTypeId: FuelType;
   pumpId: Pump;
-  tons: number;
   liters: number;
   pricePerLiter: number;
   totalCost: number;
@@ -277,11 +331,11 @@ export const stockEntriesAPI = {
     const response = await api.get(`/stock-entries/${id}`);
     return response.data;
   },
-  create: async (data: { fuelTypeId: string; pumpId: string; tons: number; pricePerLiter: number; date?: string; notes?: string }): Promise<StockEntry> => {
+  create: async (data: { fuelTypeId: string; pumpId: string; liters: number; pricePerLiter: number; date?: string; notes?: string }): Promise<StockEntry> => {
     const response = await api.post('/stock-entries', data);
     return response.data;
   },
-  update: async (id: string, data: { fuelTypeId?: string; pumpId?: string; tons?: number; pricePerLiter?: number; date?: string; notes?: string }): Promise<StockEntry> => {
+  update: async (id: string, data: { fuelTypeId?: string; pumpId?: string; liters?: number; pricePerLiter?: number; date?: string; notes?: string }): Promise<StockEntry> => {
     const response = await api.put(`/stock-entries/${id}`, data);
     return response.data;
   },

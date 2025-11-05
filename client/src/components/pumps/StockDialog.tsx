@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { formatPriceDisplay } from '../../utils/currency';
 
 interface StockDialogProps {
   open: boolean;
@@ -15,20 +16,20 @@ interface StockDialogProps {
   formData: {
     fuelTypeId: string;
     pumpId: string;
-    tons: string;
+    liters: string;
     pricePerLiter: string;
     date: string;
     notes: string;
   };
-  calculatedLiters: number;
   calculatedTotalCost: number;
   onFormDataChange: (data: any) => void;
   onFuelTypeChange: (fuelTypeId: string) => void;
-  onTonsChange: (tons: string) => void;
+  onLitersChange: (liters: string) => void;
   onPriceChange: (price: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onClose: () => void;
   getTodayDate: () => string;
+  submitting?: boolean;
 }
 
 export const StockDialog: React.FC<StockDialogProps> = ({
@@ -38,15 +39,15 @@ export const StockDialog: React.FC<StockDialogProps> = ({
   fuelTypes,
   pumps,
   formData,
-  calculatedLiters,
   calculatedTotalCost,
   onFormDataChange,
   onFuelTypeChange,
-  onTonsChange,
+  onLitersChange,
   onPriceChange,
   onSubmit,
   onClose,
   getTodayDate,
+  submitting = false,
 }) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -56,10 +57,69 @@ export const StockDialog: React.FC<StockDialogProps> = ({
             {editingStockEntry ? 'កែប្រែស្តុក' : 'បន្ថែមស្តុក'}
           </DialogTitle>
           <DialogDescription className="text-xs md:text-sm">
-            {editingStockEntry ? 'កែប្រែព័ត៌មានស្តុក' : 'បញ្ចូលព័ត៌មានស្តុកថ្មី (តោន → លីត្រ)'}
+            {editingStockEntry ? 'កែប្រែព័ត៌មានស្តុក' : 'បញ្ចូលព័ត៌មានស្តុកថ្មី'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={onSubmit}>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          
+          // Final client-side validation before calling parent handler
+          const litersStr = formData.liters?.trim() || '';
+          const priceStr = formData.pricePerLiter?.trim() || '';
+          
+          // Prevent submission if values are empty
+          if (!litersStr || litersStr === '') {
+            // Focus on the input to show HTML5 validation
+            const litersInput = document.getElementById('liters');
+            if (litersInput) {
+              litersInput.focus();
+              (litersInput as HTMLInputElement).reportValidity();
+            }
+            return;
+          }
+          
+          if (!priceStr || priceStr === '') {
+            const priceInput = document.getElementById('pricePerLiter');
+            if (priceInput) {
+              priceInput.focus();
+              (priceInput as HTMLInputElement).reportValidity();
+            }
+            return;
+          }
+          
+          const litersValue = parseFloat(litersStr);
+          const priceValue = parseFloat(priceStr);
+          
+          // Prevent submission if values are invalid
+          if (isNaN(litersValue) || litersValue <= 0 || !isFinite(litersValue)) {
+            const litersInput = document.getElementById('liters');
+            if (litersInput) {
+              litersInput.focus();
+              (litersInput as HTMLInputElement).setCustomValidity('សូមបញ្ចូលបរិមាណលីត្រដែលត្រឹមត្រូវ');
+              (litersInput as HTMLInputElement).reportValidity();
+              (litersInput as HTMLInputElement).setCustomValidity('');
+            }
+            return;
+          }
+          
+          if (isNaN(priceValue) || priceValue < 0 || !isFinite(priceValue)) {
+            const priceInput = document.getElementById('pricePerLiter');
+            if (priceInput) {
+              priceInput.focus();
+              (priceInput as HTMLInputElement).setCustomValidity('សូមបញ្ចូលតម្លៃទិញដែលត្រឹមត្រូវ');
+              (priceInput as HTMLInputElement).reportValidity();
+              (priceInput as HTMLInputElement).setCustomValidity('');
+            }
+            return;
+          }
+          
+          if (!formData.fuelTypeId || !formData.pumpId) {
+            return; // Let HTML5 validation show the error
+          }
+          
+          // All validations passed, submit
+          onSubmit(e);
+        }}>
           <div className="space-y-4 py-2 md:py-4">
             <div className="space-y-2">
               <Label htmlFor="date" className="text-sm md:text-base">ថ្ងៃ</Label>
@@ -84,25 +144,25 @@ export const StockDialog: React.FC<StockDialogProps> = ({
                   <SelectValue placeholder="ជ្រើសប្រភេទសាំង" />
                 </SelectTrigger>
                 <SelectContent>
-                  {fuelTypes.map((fuelType) => (
-                    <SelectItem key={fuelType._id} value={fuelType._id} className="text-sm">
-                      <div className="flex flex-col gap-1 w-full">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{fuelType.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {fuelType.price && fuelType.price > 0 
-                              ? `$${fuelType.price.toFixed(2)}/លីត្រ` 
-                              : 'កំណត់តាមរយៈ "កំណត់តម្លៃ"'}
-                          </span>
-                        </div>
-                        {fuelType.litersPerTon && (
-                          <div className="text-xs text-muted-foreground">
-                            {fuelType.litersPerTon}L/តោន
+                  {fuelTypes.map((fuelType) => {
+                    const priceDisplay = fuelType.price && fuelType.price > 0 
+                      ? formatPriceDisplay(fuelType.price)
+                      : null;
+                    return (
+                      <SelectItem key={fuelType._id} value={fuelType._id} className="text-sm">
+                        <div className="flex flex-col gap-1 w-full">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{fuelType.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {priceDisplay 
+                                ? `${priceDisplay.usd}/លីត្រ (${priceDisplay.riel})` 
+                                : 'កំណត់តាមរយៈ "កំណត់តម្លៃ"'}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -117,45 +177,70 @@ export const StockDialog: React.FC<StockDialogProps> = ({
                   <SelectValue placeholder="ជ្រើសស្តុកសាំង" />
                 </SelectTrigger>
                 <SelectContent>
-                  {pumps.map((pump) => {
-                    const fuelType = typeof pump.fuelTypeId === 'object' ? pump.fuelTypeId : null;
-                    const stock = pump.stockLiters || 0;
-                    return (
-                      <SelectItem key={pump._id} value={pump._id} className="text-sm">
-                        <div className="flex flex-col gap-1 w-full">
-                          <div className="flex items-center justify-between">
-                            <span className="font-medium">{pump.pumpNumber} - {fuelType?.name || 'N/A'}</span>
+                  {pumps
+                    .filter((pump) => {
+                      // If a fuel type is selected, only show pumps that match it
+                      if (formData.fuelTypeId) {
+                        const pumpFuelTypeId = typeof pump.fuelTypeId === 'object' 
+                          ? pump.fuelTypeId._id 
+                          : pump.fuelTypeId;
+                        return pumpFuelTypeId === formData.fuelTypeId;
+                      }
+                      // If no fuel type selected, show all pumps
+                      return true;
+                    })
+                    .map((pump) => {
+                      const fuelType = typeof pump.fuelTypeId === 'object' ? pump.fuelTypeId : null;
+                      const stock = pump.stockLiters || 0;
+                      const isSelected = pump._id === formData.pumpId;
+                      return (
+                        <SelectItem 
+                          key={pump._id} 
+                          value={pump._id} 
+                          className={`text-sm ${isSelected ? 'bg-accent' : ''}`}
+                        >
+                          <div className="flex flex-col gap-1 w-full">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium">{pump.pumpNumber} - {fuelType?.name || 'N/A'}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">ស្តុក: {stock.toFixed(2)}L</span>
+                              {pump.status === 'inactive' && <span className="text-orange-600">(មិនសកម្ម)</span>}
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">ស្តុក: {stock.toFixed(2)}L</span>
-                            {pump.status === 'inactive' && <span className="text-orange-600">(មិនសកម្ម)</span>}
-                          </div>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
+                        </SelectItem>
+                      );
+                    })}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="tons" className="text-sm md:text-base">បរិមាណ (តោន)</Label>
+              <Label htmlFor="liters" className="text-sm md:text-base">បរិមាណ (លីត្រ)</Label>
               <Input
-                id="tons"
+                id="liters"
                 type="number"
                 step="0.01"
-                min="0"
-                value={formData.tons}
-                onChange={(e) => onTonsChange(e.target.value)}
+                min="0.01"
+                value={formData.liters}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  // Only allow numbers and decimal point
+                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    onLitersChange(value);
+                  }
+                }}
+                onBlur={(e) => {
+                  // Validate on blur - ensure it's a valid positive number
+                  const value = parseFloat(e.target.value);
+                  if (isNaN(value) || value <= 0) {
+                    onLitersChange('');
+                  }
+                }}
                 placeholder="0.00"
                 required
                 className="h-11 md:h-10 text-base md:text-sm"
               />
-              {calculatedLiters > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  ស្មើនឹង: <span className="font-semibold text-foreground">{calculatedLiters.toFixed(2)} លីត្រ</span>
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">
@@ -166,7 +251,20 @@ export const StockDialog: React.FC<StockDialogProps> = ({
                 step="0.01"
                 min="0"
                 value={formData.pricePerLiter}
-                onChange={(e) => onPriceChange(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  // Only allow numbers and decimal point
+                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    onPriceChange(value);
+                  }
+                }}
+                onBlur={(e) => {
+                  // Validate on blur - ensure it's a valid non-negative number
+                  const value = parseFloat(e.target.value);
+                  if (isNaN(value) || value < 0) {
+                    onPriceChange('');
+                  }
+                }}
                 placeholder="0.00"
                 required
                 className="h-11 md:h-10 text-base md:text-sm"
@@ -201,9 +299,17 @@ export const StockDialog: React.FC<StockDialogProps> = ({
             </Button>
             <Button 
               type="submit"
+              disabled={submitting}
               className="w-full sm:w-auto h-11 md:h-10 text-sm md:text-base"
             >
-              {editingStockEntry ? 'រក្សាទុក' : 'បន្ថែម'}
+              {submitting ? (
+                <>
+                  <span className="mr-2 h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                  កំពុងរក្សាទុក...
+                </>
+              ) : (
+                editingStockEntry ? 'រក្សាទុក' : 'បន្ថែម'
+              )}
             </Button>
           </DialogFooter>
         </form>

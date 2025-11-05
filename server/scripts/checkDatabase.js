@@ -83,7 +83,7 @@ const checkDatabase = async () => {
       .populate('fuelTypeId', 'name')
       .sort({ date: -1 })
       .limit(5)
-      .select('date tons liters totalCost pumpId fuelTypeId')
+      .select('date liters totalCost pumpId fuelTypeId')
       .lean();
     
     if (recentStockEntries.length > 0) {
@@ -92,7 +92,7 @@ const checkDatabase = async () => {
         const date = new Date(se.date).toLocaleDateString();
         const pumpNum = se.pumpId?.pumpNumber || 'N/A';
         const fuelName = se.fuelTypeId?.name || 'N/A';
-        console.log(`  - ${date}: ${pumpNum} - ${fuelName} - ${se.tons} tons (${se.liters.toFixed(2)}L) - $${se.totalCost.toFixed(2)}`);
+        console.log(`  - ${date}: ${pumpNum} - ${fuelName} - ${se.liters.toFixed(2)}L - $${se.totalCost.toFixed(2)}`);
       });
     }
     
