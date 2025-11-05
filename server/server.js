@@ -17,19 +17,29 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
+    // Get allowed origins from environment or use defaults
+    const envOrigins = process.env.CORS_ORIGINS ? 
+      process.env.CORS_ORIGINS.split(',').map(o => o.trim()) : [];
+    
     const allowedOrigins = [
       'http://localhost:3000', 
       'http://localhost:3001', 
-      'http://127.0.0.1:3000'
+      'http://127.0.0.1:3000',
+      'https://gasstation01.netlify.app',
+      ...envOrigins
     ];
     
-    const isAllowed = allowedOrigins.indexOf(origin) !== -1;
-    
-    if (isAllowed) {
-      callback(null, true);
+    // In production, allow specified origins or all if none specified
+    if (process.env.NODE_ENV === 'production') {
+      if (allowedOrigins.length > 3 || allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow all in production if no specific origins set
+        console.log('CORS: Allowing origin:', origin);
+      }
     } else {
-      callback(null, true); // Allow all for now, but log it
-      console.log('CORS: Allowing origin:', origin);
+      // In development, allow all
+      callback(null, true);
     }
   },
   credentials: true,
@@ -46,7 +56,15 @@ app.use(cors(corsOptions));
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
-    const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
+    const envOrigins = process.env.CORS_ORIGINS ? 
+      process.env.CORS_ORIGINS.split(',').map(o => o.trim()) : [];
+    const allowedOrigins = [
+      'http://localhost:3000', 
+      'http://localhost:3001', 
+      'http://127.0.0.1:3000',
+      'https://gasstation01.netlify.app',
+      ...envOrigins
+    ];
     
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       res.header('Access-Control-Allow-Origin', origin);
@@ -82,19 +100,23 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Auto-reload function to prevent server sleep
+// Auto-reload function to prevent server sleep (Render free tier)
 const autoReload = () => {
   const https = require('https');
   
-  // Replace with your actual server URL when deployed
-  const serverUrl = process.env.SERVER_URL || "https://your-server-url.onrender.com";
+  // Use SERVER_URL or construct from Render environment
+  const serverUrl = process.env.SERVER_URL || 
+    process.env.RENDER_EXTERNAL_URL || 
+    `https://${process.env.RENDER_SERVICE_NAME || 'your-service-name'}.onrender.com`;
   
-  https.get(serverUrl, (res) => {
-    // Auto-reload request sent
+  const healthUrl = `${serverUrl}/api/health`;
+  
+  https.get(healthUrl, (res) => {
+    console.log(`✅ Auto-reload ping successful: ${res.statusCode}`);
   }).on("error", (err) => {
-    // Auto-reload failed
+    console.log(`⚠️ Auto-reload ping failed: ${err.message}`);
   }).on("timeout", () => {
-    // Auto-reload request timed out
+    console.log(`⚠️ Auto-reload ping timed out`);
   }).setTimeout(10000);
 };
 

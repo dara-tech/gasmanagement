@@ -17,6 +17,8 @@ services:
         sync: false
       - key: SERVER_URL
         sync: false
+      - key: CORS_ORIGINS
+        value: https://gasstation01.netlify.app
     healthCheckPath: /api/health
     autoDeploy: true
 
