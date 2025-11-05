@@ -1,9 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const path = require('path');
 const connectDB = require('./config/db');
 
 const app = express();
+const server = http.createServer(app);
 
 // Connect to MongoDB
 connectDB();
@@ -12,8 +15,17 @@ connectDB();
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
-    const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:3000', 
+      'http://localhost:3001', 
+      'http://127.0.0.1:3000'
+    ];
+    
+    const isAllowed = allowedOrigins.indexOf(origin) !== -1;
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
       callback(null, true); // Allow all for now, but log it
@@ -62,13 +74,41 @@ app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
+
+// Auto-reload function to prevent server sleep
+const autoReload = () => {
+  const https = require('https');
+  
+  // Replace with your actual server URL when deployed
+  const serverUrl = process.env.SERVER_URL || "https://your-server-url.onrender.com";
+  
+  https.get(serverUrl, (res) => {
+    // Auto-reload request sent
+  }).on("error", (err) => {
+    // Auto-reload failed
+  }).on("timeout", () => {
+    // Auto-reload request timed out
+  }).setTimeout(10000);
+};
 
 const PORT = process.env.PORT || 5001;
 
-const server = app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Start auto-reload pings (only in production)
+  if (process.env.NODE_ENV === 'production') {
+    console.log('🚀 Starting auto-reload pings every 14 minutes...');
+    setInterval(autoReload, 14 * 60 * 1000); // 14 minutes
+  }
 });
 
 // Handle port already in use
@@ -82,4 +122,3 @@ server.on('error', (err) => {
     process.exit(1);
   }
 });
-
