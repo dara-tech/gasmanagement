@@ -441,7 +441,14 @@ const Pumps: React.FC = () => {
       if (editingStockEntry) {
         await stockEntriesAPI.update(editingStockEntry._id, stockData);
       } else {
-        await stockEntriesAPI.create(stockData);
+        await stockEntriesAPI.create({
+          fuelTypeId: String(stockFormData.fuelTypeId).trim(),
+          pumpId: String(stockFormData.pumpId).trim(),
+          tons: Number(liters), // Explicitly ensure number type
+          pricePerLiter: Number(pricePerLiter), // Explicitly ensure number type
+          date: stockDate.toISOString(),
+          notes: (stockFormData.notes || '').trim()
+        });
       }
       handleCloseStockDialog();
       fetchData();
