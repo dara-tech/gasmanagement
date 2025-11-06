@@ -23,8 +23,10 @@ const corsOptions = {
     
     const allowedOrigins = [
       'http://localhost:3000', 
-      'http://localhost:3001', 
+      'http://localhost:3001',
+      'http://localhost:3002',
       'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
       'https://gasstation01.netlify.app',
       ...envOrigins
     ];
@@ -37,45 +39,26 @@ const corsOptions = {
         callback(null, true); // Allow all in production if no specific origins set
       }
     } else {
-      // In development, allow all
-      callback(null, true);
+      // In development, allow all localhost origins
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        callback(null, true);
+      } else if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        // Allow all in development for testing
+        callback(null, true);
+      }
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   preflightContinue: false,
   optionsSuccessStatus: 204
 };
 
 // Apply CORS to all routes
 app.use(cors(corsOptions));
-
-// Explicitly handle preflight requests - must be before other middleware
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin;
-    const envOrigins = process.env.CORS_ORIGINS ? 
-      process.env.CORS_ORIGINS.split(',').map(o => o.trim()) : [];
-    const allowedOrigins = [
-      'http://localhost:3000', 
-      'http://localhost:3001', 
-      'http://127.0.0.1:3000',
-      'https://gasstation01.netlify.app',
-      ...envOrigins
-    ];
-    
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      res.header('Access-Control-Allow-Origin', origin);
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Max-Age', '86400'); // 24 hours
-      return res.sendStatus(204);
-    }
-  }
-  next();
-});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -130,7 +113,7 @@ server.listen(PORT, () => {
     setTimeout(() => {
       autoReload();
       // Then set up regular interval
-      setInterval(autoReload, 14 * 60 * 1000); // 14 minutes
+      setInterval(autoReload, 13 * 60 * 1000); // 14 minutes
     }, 60000); // 1 minute delay
   }
 });
