@@ -182,8 +182,8 @@ const createTransaction = async (req, res) => {
 
     await transaction.save();
     
-    // Update pump stock (decrease by liters sold)
-    pump.stockLiters = Math.max(0, (pump.stockLiters || 0) - liters);
+    // Update pump stock (decrease by liters sold) - round to 2 decimal places
+    pump.stockLiters = Math.max(0, Math.round(((pump.stockLiters || 0) - liters) * 100) / 100);
     await pump.save();
 
     const populatedTransaction = await Transaction.findById(transaction._id)
@@ -222,7 +222,8 @@ const updateTransaction = async (req, res) => {
     if (oldPumpId !== newPumpId) {
       const oldPump = await Pump.findById(oldPumpId);
       if (oldPump) {
-        oldPump.stockLiters = (oldPump.stockLiters || 0) + oldLiters;
+        // Round to 2 decimal places
+        oldPump.stockLiters = Math.round(((oldPump.stockLiters || 0) + oldLiters) * 100) / 100;
         await oldPump.save();
       }
       
@@ -234,8 +235,8 @@ const updateTransaction = async (req, res) => {
         });
       }
       
-      // Deduct from new pump
-      pump.stockLiters = Math.max(0, availableStock - newLiters);
+      // Deduct from new pump - round to 2 decimal places
+      pump.stockLiters = Math.max(0, Math.round((availableStock - newLiters) * 100) / 100);
     } else {
       // Same pump - calculate net change
       const stockDifference = oldLiters - newLiters;
@@ -251,8 +252,8 @@ const updateTransaction = async (req, res) => {
         }
       }
       
-      // Update stock
-      pump.stockLiters = Math.max(0, currentStock + stockDifference);
+      // Update stock - round to 2 decimal places
+      pump.stockLiters = Math.max(0, Math.round((currentStock + stockDifference) * 100) / 100);
     }
     
     await pump.save();
@@ -327,10 +328,10 @@ const deleteTransaction = async (req, res) => {
       return res.status(404).json({ message: 'មិនឃើញព័ត៌មាន' });
     }
 
-    // Return stock to pump
+    // Return stock to pump - round to 2 decimal places
     const pump = await Pump.findById(transaction.pumpId);
     if (pump) {
-      pump.stockLiters = (pump.stockLiters || 0) + transaction.liters;
+      pump.stockLiters = Math.round(((pump.stockLiters || 0) + transaction.liters) * 100) / 100;
       await pump.save();
     }
 

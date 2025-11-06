@@ -110,8 +110,8 @@ const createStockEntry = async (req, res) => {
 
     await stockEntry.save();
 
-    // Update pump stock (increase by liters added)
-    pump.stockLiters = (pump.stockLiters || 0) + litersValue;
+    // Update pump stock (increase by liters added) - round to 2 decimal places to avoid floating point errors
+    pump.stockLiters = Math.round(((pump.stockLiters || 0) + litersValue) * 100) / 100;
     await pump.save();
 
     const populatedStockEntry = await StockEntry.findById(stockEntry._id)
@@ -195,15 +195,15 @@ const updateStockEntry = async (req, res) => {
 
     // Adjust stock: remove old liters from old pump, add new liters to new pump
     if (oldPumpId !== finalPumpId.toString()) {
-      // Pump changed
-      oldPump.stockLiters = Math.max(0, (oldPump.stockLiters || 0) - stockEntry.liters);
-      newPump.stockLiters = (newPump.stockLiters || 0) + newLiters;
+      // Pump changed - round to 2 decimal places
+      oldPump.stockLiters = Math.max(0, Math.round(((oldPump.stockLiters || 0) - stockEntry.liters) * 100) / 100);
+      newPump.stockLiters = Math.round(((newPump.stockLiters || 0) + newLiters) * 100) / 100;
       await oldPump.save();
       await newPump.save();
     } else {
-      // Same pump - adjust by difference
+      // Same pump - adjust by difference - round to 2 decimal places
       const stockDifference = newLiters - stockEntry.liters;
-      oldPump.stockLiters = Math.max(0, (oldPump.stockLiters || 0) + stockDifference);
+      oldPump.stockLiters = Math.max(0, Math.round(((oldPump.stockLiters || 0) + stockDifference) * 100) / 100);
       await oldPump.save();
     }
 
@@ -266,10 +266,10 @@ const deleteStockEntry = async (req, res) => {
       return res.status(404).json({ message: 'មិនឃើញព័ត៌មានស្តុក' });
     }
 
-    // Return stock to pump (decrease by liters)
+    // Return stock to pump (decrease by liters) - round to 2 decimal places
     const pump = await Pump.findById(stockEntry.pumpId);
     if (pump) {
-      pump.stockLiters = Math.max(0, (pump.stockLiters || 0) - stockEntry.liters);
+      pump.stockLiters = Math.max(0, Math.round(((pump.stockLiters || 0) - stockEntry.liters) * 100) / 100);
       await pump.save();
     }
 

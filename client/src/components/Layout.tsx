@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
-import { FiLogOut } from 'react-icons/fi';
+import { FiLogOut, FiRefreshCw } from 'react-icons/fi';
 import { GasStationIcon, FuelPumpIcon, ReceiptIcon } from './icons';
 import { prefetchRoute, prefetchCriticalRoutes } from '../utils/prefetch';
+import { useToast } from '../hooks/use-toast';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -12,6 +13,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // Check if dialog is open by monitoring body class
@@ -42,6 +44,26 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     navigate('/login');
+  };
+
+  const handleClearCache = () => {
+    // Clear cached preferences but keep authentication data
+    localStorage.removeItem('transactionCurrency');
+    localStorage.removeItem('transactionDiscountCurrency');
+    localStorage.removeItem('stockPriceCurrency');
+    localStorage.removeItem('exchangeRate');
+    
+    // Show toast before reload
+    toast({
+      variant: 'success',
+      title: 'ជោគជ័យ',
+      description: 'បានលុប cache ដោយជោគជ័យ',
+    });
+    
+    // Reload the page after a short delay to show the toast
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
   };
 
   const navItems = [
@@ -80,7 +102,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               })}
             </div>
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" onClick={handleClearCache} title="លុប Cache">
+              {/* @ts-ignore */}
+              <FiRefreshCw className="mr-2 h-4 w-4" />
+              <span className="hidden lg:inline">លុប Cache</span>
+            </Button>
             <Button variant="ghost" onClick={handleLogout}>
               {/* @ts-ignore */}
               <FiLogOut className="mr-2 h-4 w-4" />
@@ -94,10 +121,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <nav className="md:hidden border-b bg-card sticky top-0 z-50">
         <div className="flex h-14 items-center justify-between px-4">
           <h1 className="text-lg font-bold">ការាស់សាំង</h1>
-          <Button variant="ghost" size="icon" onClick={handleLogout}>
-            {/* @ts-ignore */}
-            <FiLogOut className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={handleClearCache} title="លុប Cache">
+              {/* @ts-ignore */}
+              <FiRefreshCw className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={handleLogout}>
+              {/* @ts-ignore */}
+              <FiLogOut className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
       </nav>
 
