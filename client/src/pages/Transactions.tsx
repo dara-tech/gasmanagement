@@ -89,18 +89,22 @@ const Transactions: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, itemsPerPage]);
 
-  const fetchData = async (page: number = 1) => {
+  const fetchData = async (page: number = 1, overridePeriod?: typeof period, overrideDateRange?: typeof customDateRange) => {
     try {
       setLoading(true);
 
       const filters: { startDate?: string; endDate?: string; pumpId?: string } = {};
       
+      // Use override values if provided, otherwise use state values
+      const currentPeriod = overridePeriod !== undefined ? overridePeriod : period;
+      const currentDateRange = overrideDateRange !== undefined ? overrideDateRange : customDateRange;
+      
       // Calculate date range based on period (same logic as Dashboard)
-      if (period === 'custom' && customDateRange.from && customDateRange.to) {
-        filters.startDate = customDateRange.from.toISOString().split('T')[0];
-        filters.endDate = customDateRange.to.toISOString().split('T')[0];
+      if (currentPeriod === 'custom' && currentDateRange.from && currentDateRange.to) {
+        filters.startDate = currentDateRange.from.toISOString().split('T')[0];
+        filters.endDate = currentDateRange.to.toISOString().split('T')[0];
       } else {
-        const range = getDateRange(period);
+        const range = getDateRange(currentPeriod);
         filters.startDate = range.startDate.toISOString().split('T')[0];
         filters.endDate = range.endDate.toISOString().split('T')[0];
       }
@@ -172,9 +176,30 @@ const Transactions: React.FC = () => {
     setDialogOpen(true);
   };
 
-  const handleDialogSuccess = () => {
-    setCurrentPage(1);
-    fetchData(1);
+  const handleDialogSuccess = (transactionDate?: string, createdTransaction?: Transaction) => {
+    // If we have the created transaction, add it to the list immediately
+    // This ensures it shows up right away without waiting for a refresh
+    if (createdTransaction) {
+      setTransactions(prev => {
+        // Check if transaction already exists (shouldn't, but just in case)
+        const exists = prev.some(t => t._id === createdTransaction._id);
+        if (exists) {
+          return prev;
+        }
+        // Add to the beginning of the list and sort by date (newest first)
+        const updated = [createdTransaction, ...prev].sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        return updated;
+      });
+      
+      // Update pagination total
+      setPagination(prev => prev ? { ...prev, total: prev.total + 1 } : null);
+    } else {
+      // If no transaction provided (e.g., update), just refresh
+      setCurrentPage(1);
+      fetchData(1);
+    }
   };
 
   const handleDeleteClick = (id: string) => {

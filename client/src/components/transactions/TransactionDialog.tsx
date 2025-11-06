@@ -21,7 +21,7 @@ interface TransactionDialogProps {
   editingTransaction: Transaction | null;
   pumps: Pump[];
   allPumps: Pump[];
-  onSuccess: () => void;
+  onSuccess: (transactionDate?: string, createdTransaction?: Transaction) => void;
   getTodayDate: () => string;
 }
 
@@ -235,6 +235,8 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         discountValue = rielToUsd(discountValue, exchangeRate);
       }
 
+      let createdTransaction: Transaction | undefined;
+      
       if (editingTransaction) {
         await transactionsAPI.update(editingTransaction._id, {
           pumpId: formData.pumpId,
@@ -245,7 +247,7 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
           discountType: formData.discountType,
         });
       } else {
-        await transactionsAPI.create({
+        createdTransaction = await transactionsAPI.create({
           pumpId: formData.pumpId,
           fuelTypeId: pump.fuelTypeId._id,
           liters: transactionLiters,
@@ -256,7 +258,8 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
       }
       
       onOpenChange(false);
-      onSuccess();
+      const transactionDateStr = transactionDate.toISOString().split('T')[0];
+      onSuccess(transactionDateStr, createdTransaction);
       toast({
         variant: 'success',
         title: 'ជោគជ័យ',
