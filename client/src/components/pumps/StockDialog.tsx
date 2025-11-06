@@ -5,7 +5,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { formatPriceDisplay } from '../../utils/currency';
+import { formatPriceDisplay, usdToRiel, rielToUsd, getExchangeRate } from '../../utils/currency';
 
 interface StockDialogProps {
   open: boolean;
@@ -30,6 +30,8 @@ interface StockDialogProps {
   onClose: () => void;
   getTodayDate: () => string;
   submitting?: boolean;
+  currency?: 'USD' | 'KHR';
+  onCurrencyChange?: (currency: 'USD' | 'KHR') => void;
 }
 
 export const StockDialog: React.FC<StockDialogProps> = ({
@@ -48,7 +50,10 @@ export const StockDialog: React.FC<StockDialogProps> = ({
   onClose,
   getTodayDate,
   submitting = false,
+  currency = 'USD',
+  onCurrencyChange,
 }) => {
+  const exchangeRate = getExchangeRate();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] md:max-w-md mx-2 md:mx-auto mb-10">
@@ -244,18 +249,39 @@ export const StockDialog: React.FC<StockDialogProps> = ({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="pricePerLiter" className="text-sm md:text-base">តម្លៃទិញ (ក្នុង 1 លីត្រ)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pricePerLiter" className="text-sm md:text-base">តម្លៃទិញ (ក្នុង 1 លីត្រ)</Label>
+                {onCurrencyChange && (
+                  <Select value={currency} onValueChange={(value: 'USD' | 'KHR') => onCurrencyChange(value)}>
+                    <SelectTrigger className="w-[100px] h-8 md:h-9 text-xs md:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                      <SelectItem value="KHR">KHR (៛)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
               <Input
                 id="pricePerLiter"
                 type="number"
-                step="0.01"
+                step={currency === 'KHR' ? '1' : '0.01'}
                 min="0"
                 value={formData.pricePerLiter}
                 onChange={(e) => {
                   const value = e.target.value;
-                  // Only allow numbers and decimal point
-                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                    onPriceChange(value);
+                  // Only allow numbers and decimal point (for USD)
+                  if (currency === 'KHR') {
+                    // For Riel, only allow integers
+                    if (value === '' || /^\d*$/.test(value)) {
+                      onPriceChange(value);
+                    }
+                  } else {
+                    // For USD, allow decimals
+                    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                      onPriceChange(value);
+                    }
                   }
                 }}
                 onBlur={(e) => {
@@ -265,13 +291,31 @@ export const StockDialog: React.FC<StockDialogProps> = ({
                     onPriceChange('');
                   }
                 }}
-                placeholder="0.00"
+                placeholder={currency === 'KHR' ? '0' : '0.00'}
                 required
                 className="h-11 md:h-10 text-base md:text-sm"
               />
+              {formData.pricePerLiter && parseFloat(formData.pricePerLiter) > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {currency === 'KHR' ? (
+                    <>
+                      USD: <span className="font-semibold">${rielToUsd(parseFloat(formData.pricePerLiter), exchangeRate).toFixed(2)}</span>
+                    </>
+                  ) : (
+                    <>
+                      KHR: <span className="font-semibold">៛{usdToRiel(parseFloat(formData.pricePerLiter), exchangeRate).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</span>
+                    </>
+                  )}
+                </p>
+              )}
               {calculatedTotalCost > 0 && (
                 <p className="text-xs text-muted-foreground">
                   សរុប: <span className="font-semibold text-foreground text-green-600">${calculatedTotalCost.toFixed(2)}</span>
+                  {currency === 'KHR' && (
+                    <span className="ml-2">
+                      (<span className="font-semibold">៛{usdToRiel(calculatedTotalCost, exchangeRate).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</span>)
+                    </span>
+                  )}
                 </p>
               )}
             </div>

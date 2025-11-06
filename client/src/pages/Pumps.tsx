@@ -4,6 +4,7 @@ import { useToast } from '../hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { createLazyComponent } from '../utils/lazyLoad';
 import { InlineLoading } from '../components/LoadingFallback';
+import { usdToRiel, rielToUsd } from '../utils/currency';
 
 // Eagerly load critical tab components (always visible)
 import { FuelTypesTab, PumpsTab, StockEntriesTab } from '../components/pumps';
@@ -63,6 +64,10 @@ const Pumps: React.FC = () => {
     date: '',
     notes: ''
   });
+  const [stockPriceCurrency, setStockPriceCurrency] = useState<'USD' | 'KHR'>(() => {
+    const saved = localStorage.getItem('stockPriceCurrency');
+    return (saved === 'KHR' || saved === 'USD') ? saved : 'USD';
+  });
   const [calculatedTotalCost, setCalculatedTotalCost] = useState(0);
 
   // Fuel type management states
@@ -83,23 +88,33 @@ const Pumps: React.FC = () => {
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [priceHistory, setPriceHistory] = useState<FuelPriceHistory[]>([]);
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
-  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  // Save currency preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('stockPriceCurrency', stockPriceCurrency);
+  }, [stockPriceCurrency]);
+
   // Recalculate total cost when liters or price changes
   useEffect(() => {
     if (stockFormData.liters && stockFormData.pricePerLiter) {
       const liters = parseFloat(stockFormData.liters) || 0;
-      const price = parseFloat(stockFormData.pricePerLiter) || 0;
+      let price = parseFloat(stockFormData.pricePerLiter) || 0;
+      
+      // If currency is Riel, convert to USD for calculation (backend stores in USD)
+      if (stockPriceCurrency === 'KHR') {
+        price = rielToUsd(price);
+      }
+      
       const totalCost = liters * price;
       setCalculatedTotalCost(isNaN(totalCost) ? 0 : totalCost);
     } else {
       setCalculatedTotalCost(0);
     }
-  }, [stockFormData.liters, stockFormData.pricePerLiter]);
+  }, [stockFormData.liters, stockFormData.pricePerLiter, stockPriceCurrency]);
 
   // Fetch price history when fuel type is selected in price dialog
   useEffect(() => {
@@ -119,28 +134,6 @@ const Pumps: React.FC = () => {
       setPumps(pumpsData);
       setFuelTypes(fuelTypesData);
       setStockEntries(stockEntriesData);
-      
-      // Fetch current prices for all fuel types (silently fail if no prices exist)
-      const pricePromises = fuelTypesData.map(async (fuelType) => {
-        try {
-          const priceData = await fuelPricesAPI.getCurrent(fuelType._id);
-          return { id: fuelType._id, price: priceData.price };
-        } catch (error: any) {
-          // 404 is expected if no price history exists - use default price
-          if (error?.response?.status === 404) {
-            return { id: fuelType._id, price: fuelType.price || 0 };
-          }
-          // For other errors, still use default price but log
-          console.warn(`Error fetching price for ${fuelType.name}:`, error?.response?.status || error);
-          return { id: fuelType._id, price: fuelType.price || 0 };
-        }
-      });
-      const prices = await Promise.all(pricePromises);
-      const priceMap: Record<string, number> = {};
-      prices.forEach(({ id, price }) => {
-        priceMap[id] = price;
-      });
-      setCurrentPrices(priceMap);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -247,11 +240,19 @@ const Pumps: React.FC = () => {
       const pump = typeof stockEntry.pumpId === 'object' ? stockEntry.pumpId : null;
       const entryDate = new Date(stockEntry.date);
       const dateStr = entryDate.toISOString().split('T')[0];
+      
+      // Convert price to selected currency for display
+      let displayPrice = stockEntry.pricePerLiter?.toString() || '';
+      if (stockPriceCurrency === 'KHR' && stockEntry.pricePerLiter) {
+        const rielPrice = usdToRiel(stockEntry.pricePerLiter);
+        displayPrice = rielPrice.toFixed(0);
+      }
+      
       setStockFormData({
         fuelTypeId: fuelType?._id || '',
         pumpId: pump?._id || '',
         liters: stockEntry.liters.toString(),
-        pricePerLiter: stockEntry.pricePerLiter?.toString() || '',
+        pricePerLiter: displayPrice,
         date: dateStr,
         notes: stockEntry.notes || '',
       });
@@ -386,7 +387,12 @@ const Pumps: React.FC = () => {
       
       // Parse and validate numbers
       const liters = parseFloat(litersStr);
-      const pricePerLiter = parseFloat(priceStr);
+      let pricePerLiter = parseFloat(priceStr);
+      
+      // Convert Riel to USD if currency is Riel (backend expects USD)
+      if (stockPriceCurrency === 'KHR') {
+        pricePerLiter = rielToUsd(pricePerLiter);
+      }
       
       // Strict validation - ensure they are actual numbers, not NaN
       if (typeof liters !== 'number' || isNaN(liters) || liters <= 0 || !isFinite(liters)) {
@@ -444,7 +450,7 @@ const Pumps: React.FC = () => {
         await stockEntriesAPI.create({
           fuelTypeId: String(stockFormData.fuelTypeId).trim(),
           pumpId: String(stockFormData.pumpId).trim(),
-          tons: Number(liters), // Explicitly ensure number type
+          liters: Number(liters), // Use liters, not tons - backend expects liters
           pricePerLiter: Number(pricePerLiter), // Explicitly ensure number type
           date: stockDate.toISOString(),
           notes: (stockFormData.notes || '').trim()
@@ -700,7 +706,7 @@ const Pumps: React.FC = () => {
     setPriceDialogOpen(true);
     
     // Set initial form data
-    const initialPrice = currentPrices[fuelType._id] || fuelType.price || 0;
+    const initialPrice = fuelType.price || 0;
     setPriceFormData({
       price: initialPrice.toString(),
       date: today,
@@ -760,7 +766,7 @@ const Pumps: React.FC = () => {
       setIsUsingDefaultPrice(priceData.isDefault || false);
     } catch (error: any) {
       // 404 is expected if no price for this date - use default price
-      const defaultPrice = (selectedFuelType?.price && selectedFuelType.price > 0) ? selectedFuelType.price : (currentPrices[selectedFuelType?._id || ''] || 0);
+      const defaultPrice = selectedFuelType?.price || 0;
       setPriceFormData(prev => ({
         ...prev,
         date: selectedDate,
@@ -952,7 +958,6 @@ const Pumps: React.FC = () => {
           <PumpsTab
               pumps={pumps}
               fuelTypes={fuelTypes}
-              currentPrices={currentPrices}
               onAdd={() => handleOpenPumpDialog()}
               onEdit={handleOpenPumpDialog}
               onDelete={handlePumpDeleteClick}
@@ -1020,6 +1025,8 @@ const Pumps: React.FC = () => {
           onClose={handleCloseStockDialog}
           getTodayDate={getTodayDate}
           submitting={submittingStock}
+          currency={stockPriceCurrency}
+          onCurrencyChange={setStockPriceCurrency}
         />
       </Suspense>
 

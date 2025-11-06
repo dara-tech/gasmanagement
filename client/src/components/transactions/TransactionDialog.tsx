@@ -13,6 +13,7 @@ import {
 import { Transaction, Pump, fuelPricesAPI } from '../../services/api';
 import { useToast } from '../../hooks/use-toast';
 import { transactionsAPI } from '../../services/api';
+import { usdToRiel, rielToUsd, getExchangeRate } from '../../utils/currency';
 
 interface TransactionDialogProps {
   open: boolean;
@@ -41,8 +42,13 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
     discount: '',
     discountType: 'amount' as 'amount' | 'percentage',
   });
+  const [discountCurrency, setDiscountCurrency] = useState<'USD' | 'KHR'>(() => {
+    const saved = localStorage.getItem('transactionDiscountCurrency');
+    return (saved === 'KHR' || saved === 'USD') ? saved : 'USD';
+  });
   const [calculatedTotal, setCalculatedTotal] = useState(0);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const exchangeRate = getExchangeRate();
 
   useEffect(() => {
     if (editingTransaction) {
@@ -56,7 +62,17 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
       }
       
       // Use the transaction's priceOut when editing
-      setCurrentPrice(editingTransaction.priceOut || editingTransaction.price || null);
+      const transactionPrice = editingTransaction.priceOut || editingTransaction.price || null;
+      setCurrentPrice(transactionPrice);
+      
+      // Convert discount to selected currency if it's an amount (not percentage)
+      if (editingTransaction.discountType === 'amount' && editingTransaction.discount) {
+        if (discountCurrency === 'KHR') {
+          discountValue = usdToRiel(editingTransaction.discount, exchangeRate).toFixed(0);
+        } else {
+          discountValue = editingTransaction.discount.toFixed(2);
+        }
+      }
       
       setFormData({
         pumpId: pump?._id || '',
@@ -114,6 +130,11 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
       }
     }
   };
+
+  // Save currency preference
+  useEffect(() => {
+    localStorage.setItem('transactionDiscountCurrency', discountCurrency);
+  }, [discountCurrency]);
 
   const handlePumpChange = (pumpId: string) => {
     setFormData({ ...formData, pumpId });
@@ -201,7 +222,11 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
         ? new Date(`${formData.date}T12:00:00`)
         : new Date();
 
-      const discountValue = parseFloat(formData.discount) || 0;
+      // Convert discount to USD if it's in KHR
+      let discountValue = parseFloat(formData.discount) || 0;
+      if (formData.discountType === 'amount' && discountCurrency === 'KHR') {
+        discountValue = rielToUsd(discountValue, exchangeRate);
+      }
 
       if (editingTransaction) {
         await transactionsAPI.update(editingTransaction._id, {
@@ -363,28 +388,68 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
               <div className="flex gap-2">
                 <Select
                   value={formData.discountType}
-                  onValueChange={(value: 'amount' | 'percentage') => setFormData({ ...formData, discountType: value, discount: '' })}
+                  onValueChange={(value: 'amount' | 'percentage') => {
+                    setFormData({ ...formData, discountType: value, discount: '' });
+                  }}
                 >
                   <SelectTrigger className="w-[120px] h-11 md:h-10 text-sm md:text-base">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="amount">$ (ចំនួន)</SelectItem>
+                    <SelectItem value="amount">ចំនួន</SelectItem>
                     <SelectItem value="percentage">% (ភាគរយ)</SelectItem>
                   </SelectContent>
                 </Select>
+                {formData.discountType === 'amount' && (
+                  <Select
+                    value={discountCurrency}
+                    onValueChange={(value: 'USD' | 'KHR') => {
+                      setDiscountCurrency(value);
+                      // Convert existing discount when currency changes
+                      if (formData.discount) {
+                        const currentDiscount = parseFloat(formData.discount);
+                        if (!isNaN(currentDiscount)) {
+                          if (value === 'KHR') {
+                            // Convert USD to KHR
+                            const usdValue = discountCurrency === 'USD' ? currentDiscount : rielToUsd(currentDiscount, exchangeRate);
+                            setFormData({ ...formData, discount: usdToRiel(usdValue, exchangeRate).toFixed(0) });
+                          } else {
+                            // Convert KHR to USD
+                            const khrValue = discountCurrency === 'KHR' ? currentDiscount : usdToRiel(currentDiscount, exchangeRate);
+                            setFormData({ ...formData, discount: rielToUsd(khrValue, exchangeRate).toFixed(2) });
+                          }
+                        }
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-[100px] h-11 md:h-10 text-sm md:text-base">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                      <SelectItem value="KHR">KHR (៛)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
                 <Input
                   id="discount"
                   type="number"
-                  step={formData.discountType === 'percentage' ? '0.1' : '0.01'}
+                  step={formData.discountType === 'percentage' ? '0.1' : (discountCurrency === 'KHR' ? '1' : '0.01')}
                   min="0"
                   max={formData.discountType === 'percentage' ? '100' : undefined}
                   value={formData.discount}
                   onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
-                  placeholder={formData.discountType === 'percentage' ? '0.0' : '0.00'}
+                  placeholder={formData.discountType === 'percentage' ? '0.0' : (discountCurrency === 'KHR' ? '0' : '0.00')}
                   className="flex-1 h-11 md:h-10 text-base md:text-sm"
                 />
               </div>
+              {formData.discountType === 'amount' && formData.discount && (
+                <p className="text-xs text-muted-foreground">
+                  {discountCurrency === 'KHR' 
+                    ? `≈ $${rielToUsd(parseFloat(formData.discount) || 0, exchangeRate).toFixed(2)}` 
+                    : `≈ ${usdToRiel(parseFloat(formData.discount) || 0, exchangeRate).toFixed(0)}៛`}
+                </p>
+              )}
             </div>
             {calculatedTotal > 0 && (
               <div className="p-4 bg-muted rounded-lg border">
@@ -407,7 +472,12 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
                     if (formData.discountType === 'percentage') {
                       discountAmount = (calculatedTotal * discountValue) / 100;
                     } else {
-                      discountAmount = discountValue;
+                      // Convert KHR to USD for calculation
+                      if (discountCurrency === 'KHR') {
+                        discountAmount = rielToUsd(discountValue, exchangeRate);
+                      } else {
+                        discountAmount = discountValue;
+                      }
                     }
                     const finalTotal = Math.max(0, calculatedTotal - discountAmount);
                     

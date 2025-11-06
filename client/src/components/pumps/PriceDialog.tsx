@@ -220,11 +220,13 @@ export const PriceDialog: React.FC<PriceDialogProps> = ({
                     <Label htmlFor="priceDate" className="text-sm font-semibold">ថ្ងៃ</Label>
                     {priceFormData.date && (
                       <span className="text-xs text-muted-foreground">
-                        {new Date(priceFormData.date).toLocaleDateString('km-KH', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
+                        {(() => {
+                          const date = new Date(priceFormData.date);
+                          const day = String(date.getDate()).padStart(2, '0');
+                          const month = String(date.getMonth() + 1).padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}/${month}/${year}`;
+                        })()}
                       </span>
                     )}
                   </div>

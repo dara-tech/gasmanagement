@@ -329,11 +329,11 @@ export const stockEntriesAPI = {
     const response = await api.get(`/stock-entries/${id}`);
     return response.data;
   },
-  create: async (data: { fuelTypeId: string; pumpId: string; tons: number; pricePerLiter: number; date?: string; notes?: string }): Promise<StockEntry> => {
+  create: async (data: { fuelTypeId: string; pumpId: string; liters: number; pricePerLiter: number; date?: string; notes?: string }): Promise<StockEntry> => {
     const response = await api.post('/stock-entries', data);
     return response.data;
   },
-  update: async (id: string, data: { fuelTypeId?: string; pumpId?: string; tons?: number; pricePerLiter?: number; date?: string; notes?: string }): Promise<StockEntry> => {
+  update: async (id: string, data: { fuelTypeId?: string; pumpId?: string; liters?: number; pricePerLiter?: number; date?: string; notes?: string }): Promise<StockEntry> => {
     const response = await api.put(`/stock-entries/${id}`, data);
     return response.data;
   },

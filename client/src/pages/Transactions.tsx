@@ -27,6 +27,7 @@ const Transactions: React.FC = () => {
   const [pumps, setPumps] = useState<Pump[]>([]);
   const [allPumps, setAllPumps] = useState<Pump[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pumpsLoaded, setPumpsLoaded] = useState(false); // Track if pumps are already loaded
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [pagination, setPagination] = useState<{ page: number; limit: number; total: number; totalPages: number; hasMore: boolean } | null>(null);
@@ -106,7 +107,14 @@ const Transactions: React.FC = () => {
       
       if (filterPump && filterPump !== 'all') filters.pumpId = filterPump;
 
-      const response = await transactionsAPI.getPaginated(page, itemsPerPage, filters);
+      // Fetch transactions and pumps in parallel for better performance
+      // Only fetch pumps if not already loaded (cache pumps data)
+      const promises: [Promise<any>, Promise<any> | null] = [
+        transactionsAPI.getPaginated(page, itemsPerPage, filters),
+        (page === 1 && !pumpsLoaded) ? pumpsAPI.getAll() : Promise.resolve(null)
+      ];
+
+      const [response, pumpsData] = await Promise.all(promises);
       
       // Ensure response has the expected structure
       if (!response || !response.transactions) {
@@ -123,14 +131,14 @@ const Transactions: React.FC = () => {
       setTransactions(response.transactions || []);
       setPagination(response.pagination || null);
 
-      // Fetch pumps only on initial load
-      if (page === 1) {
+      // Set pumps data if fetched (only on page 1 and not already loaded)
+      if (page === 1 && pumpsData && !pumpsLoaded) {
         try {
-          const pumpsData = await pumpsAPI.getAll();
           setAllPumps(Array.isArray(pumpsData) ? pumpsData : []);
           setPumps((Array.isArray(pumpsData) ? pumpsData : []).filter(p => p.status === 'active'));
+          setPumpsLoaded(true); // Mark pumps as loaded
         } catch (pumpError) {
-          console.error('Error fetching pumps:', pumpError);
+          console.error('Error processing pumps:', pumpError);
           // Don't block the transactions display if pumps fail to load
         }
       }

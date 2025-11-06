@@ -10,7 +10,6 @@ import { formatPriceDisplay } from '../../utils/currency';
 interface PumpsTabProps {
   pumps: Pump[];
   fuelTypes: FuelType[];
-  currentPrices: Record<string, number>;
   onAdd: () => void;
   onEdit: (pump: Pump) => void;
   onDelete: (id: string) => void;
@@ -19,7 +18,6 @@ interface PumpsTabProps {
 export const PumpsTab: React.FC<PumpsTabProps> = ({
   pumps,
   fuelTypes,
-  currentPrices,
   onAdd,
   onEdit,
   onDelete,
@@ -69,17 +67,13 @@ export const PumpsTab: React.FC<PumpsTabProps> = ({
                           {pump.status === 'active' ? 'សកម្ម' : 'មិនសកម្ម'}
                         </span>
                       </p>
-                      {fuelType && (() => {
-                        const currentPrice = currentPrices[fuelType._id] || 0;
-                        if (currentPrice > 0) {
-                          const { usd, riel } = formatPriceDisplay(currentPrice);
-                          return (
-                            <p className="text-sm">
-                              <span className="font-medium">តម្លៃ:</span> {usd} ({riel}) / {fuelType.unit}
-                            </p>
-                          );
-                        }
-                        return null;
+                      {fuelType && fuelType.price && fuelType.price > 0 && (() => {
+                        const { usd, riel } = formatPriceDisplay(fuelType.price);
+                        return (
+                          <p className="text-sm">
+                            <span className="font-medium">តម្លៃ:</span> {usd} ({riel}) / {fuelType.unit}
+                          </p>
+                        );
                       })()}
                       <p className="text-sm">
                         <span className="font-medium">ស្តុក:</span>{' '}
@@ -152,20 +146,18 @@ export const PumpsTab: React.FC<PumpsTabProps> = ({
                             </span>
                           </TableCell>
                           <TableCell className="text-right font-mono py-3">
-                            {fuelType ? (
+                            {fuelType && fuelType.price && fuelType.price > 0 ? (
                               (() => {
-                                const currentPrice = currentPrices[fuelType._id] || 0;
-                                if (currentPrice > 0) {
-                                  const { usd, riel } = formatPriceDisplay(currentPrice);
-                                  return (
-                                    <div className="flex flex-col items-end">
-                                      <span>{usd}/{fuelType.unit}</span>
-                                      <span className="text-xs text-muted-foreground">({riel})</span>
-                                    </div>
-                                  );
-                                }
-                                return <span className="text-muted-foreground text-xs">កំណត់តាមរយៈ "កំណត់តម្លៃ"</span>;
+                                const { usd, riel } = formatPriceDisplay(fuelType.price);
+                                return (
+                                  <div className="flex flex-col items-end">
+                                    <span>{usd}/{fuelType.unit}</span>
+                                    <span className="text-xs text-muted-foreground">({riel})</span>
+                                  </div>
+                                );
                               })()
+                            ) : fuelType ? (
+                              <span className="text-muted-foreground text-xs">កំណត់តាមរយៈ "កំណត់តម្លៃ"</span>
                             ) : '-'}
                           </TableCell>
                           <TableCell className={`text-right font-mono font-semibold py-3 ${
