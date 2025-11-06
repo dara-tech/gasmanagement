@@ -5,25 +5,53 @@ const getApiUrl = (): string => {
   const envUrl = process.env.REACT_APP_API_URL;
   const defaultUrl = 'https://gasmanagement.onrender.com/api';
   
+  // Check if we're in production (Netlify, etc.)
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isLocalhost = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const isDevelopment = !isProduction && isLocalhost;
+  
+  // In production, NEVER use localhost - always use production URL or env var
+  if (isProduction && envUrl && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+    console.warn('⚠️ Invalid localhost URL in production! Using default production URL.');
+    console.log('🔧 Using production API URL:', defaultUrl);
+    return defaultUrl;
+  }
+  
+  // If no env var is set
   if (!envUrl) {
+    // In development and running on localhost, use localhost API
+    if (isDevelopment) {
+      const localUrl = 'http://localhost:5001/api';
+      console.log('🔧 Using local API URL:', localUrl);
+      return localUrl;
+    }
+    // Otherwise use production URL
+    console.log('🔧 Using production API URL:', defaultUrl);
     return defaultUrl;
   }
   
   // If URL already has protocol, return as is
   if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
+    console.log('🔧 Using API URL from env:', envUrl);
     return envUrl;
   }
   
   // If URL is localhost or starts with a hostname, add http://
   if (envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) {
-    return `http://${envUrl}`;
+    const localUrl = `http://${envUrl}`;
+    console.log('🔧 Using localhost API URL:', localUrl);
+    return localUrl;
   }
   
   // For other cases, assume https
-  return `https://${envUrl}`;
+  const httpsUrl = `https://${envUrl}`;
+  console.log('🔧 Using HTTPS API URL:', httpsUrl);
+  return httpsUrl;
 };
 
 const API_URL = getApiUrl();
+console.log('🌐 API Base URL initialized:', API_URL);
 
 const api = axios.create({
   baseURL: API_URL,

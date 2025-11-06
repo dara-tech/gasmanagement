@@ -90,12 +90,15 @@ const autoReload = () => {
   const serverUrl = process.env.SERVER_URL || 'https://gasmanagement.onrender.com';
   const healthUrl = `${serverUrl}/api/health`;
   
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 🔄 Auto-reload ping starting...`);
+  
   https.get(healthUrl, (res) => {
-    // Auto-reload ping successful (silent)
+    console.log(`[${new Date().toISOString()}] ✅ Auto-reload ping successful - Status: ${res.statusCode}`);
   }).on("error", (err) => {
-    // Auto-reload ping failed (silent)
+    console.log(`[${new Date().toISOString()}] ❌ Auto-reload ping failed: ${err.message}`);
   }).on("timeout", () => {
-    // Auto-reload ping timed out (silent)
+    console.log(`[${new Date().toISOString()}] ⏰ Auto-reload ping timed out`);
   }).setTimeout(10000);
 };
 
@@ -105,17 +108,16 @@ server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   
-  // Start auto-reload pings (only in production)
-  if (process.env.NODE_ENV === 'production') {
-    console.log('🚀 Starting auto-reload pings every 14 minutes...');
-    
-    // Send first ping after 1 minute to ensure server is ready
-    setTimeout(() => {
-      autoReload();
-      // Then set up regular interval
-      setInterval(autoReload, 13 * 60 * 1000); // 14 minutes
-    }, 60000); // 1 minute delay
-  }
+  // Start auto-reload pings (running in all environments for testing)
+  console.log('🚀 Starting auto-reload pings every 10 minutes...');
+  
+  // Send first ping after 1 minute to ensure server is ready
+  setTimeout(() => {
+    console.log('🚀 Auto-reload started! First ping in 1 minute...');
+    autoReload();
+    // Then set up regular interval
+    setInterval(autoReload, 10 * 60 * 1000); // 10 minutes
+  }, 60000); // 1 minute delay
 });
 
 // Handle port already in use
