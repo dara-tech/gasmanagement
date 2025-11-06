@@ -160,6 +160,13 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
     }).format(amount);
   };
 
+  const formatRiel = (amount: number) => {
+    return new Intl.NumberFormat('km-KH', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -457,13 +464,21 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
                   {currentPrice !== null && formData.pumpId && (
                     <div className="flex items-center justify-between text-xs text-muted-foreground pb-2 border-b">
                       <span>តម្លៃសម្រាប់ថ្ងៃនេះ:</span>
-                      <span className="font-semibold">{formatCurrency(currentPrice)}/លីត្រ</span>
+                      <span className="font-semibold">
+                        {formatCurrency(currentPrice)}/លីត្រ
+                        <span className="ml-2 text-[10px] text-muted-foreground">
+                          ({formatRiel(usdToRiel(currentPrice, exchangeRate))}៛/លីត្រ)
+                        </span>
+                      </span>
                     </div>
                   )}
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-sm md:text-base">សរុបមុនបញ្ចុះ:</span>
                     <span className="text-lg md:text-xl font-bold">
                       {formatCurrency(calculatedTotal)}
+                      <span className="ml-2 text-xs text-muted-foreground font-normal">
+                        ({formatRiel(usdToRiel(calculatedTotal, exchangeRate))}៛)
+                      </span>
                     </span>
                   </div>
                   {parseFloat(formData.discount || '0') > 0 && (() => {
@@ -489,12 +504,18 @@ export const TransactionDialog: React.FC<TransactionDialogProps> = ({
                           </span>
                           <span className="font-semibold text-red-600">
                             -{formatCurrency(discountAmount)}
+                            <span className="ml-2 text-xs text-muted-foreground font-normal">
+                              (-{formatRiel(usdToRiel(discountAmount, exchangeRate))}៛)
+                            </span>
                           </span>
                         </div>
                         <div className="flex items-center justify-between pt-2 border-t">
                           <span className="font-semibold text-sm md:text-base">សរុប:</span>
                           <span className="text-xl md:text-2xl font-bold">
                             {formatCurrency(finalTotal)}
+                            <span className="ml-2 text-xs text-muted-foreground font-normal">
+                              ({formatRiel(usdToRiel(finalTotal, exchangeRate))}៛)
+                            </span>
                           </span>
                         </div>
                       </>

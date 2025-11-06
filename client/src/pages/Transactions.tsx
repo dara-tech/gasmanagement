@@ -1279,7 +1279,7 @@ const Transactions: React.FC = () => {
                   
                   return (
                     <DailyTransactionGroup
-                      key={date}
+                      key={`${date}-${currency}`}
                       date={date}
                       transactions={sortedTransactions}
                       onEdit={handleOpenDialog}
@@ -1294,6 +1294,7 @@ const Transactions: React.FC = () => {
                       selectedIds={selectedIds}
                       onSelectionChange={handleSelectionChange}
                       onSelectAll={(selected: boolean) => handleSelectAll(selected, sortedTransactions.map(t => t._id))}
+                      currency={currency}
                     />
                   );
                 })}
