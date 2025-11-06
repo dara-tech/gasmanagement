@@ -105,7 +105,6 @@ const autoReload = () => {
   
   // Use the specific Render URL
   const serverUrl = process.env.SERVER_URL || 'https://gasmanagement.onrender.com';
-  
   const healthUrl = `${serverUrl}/api/health`;
   
   https.get(healthUrl, (res) => {
