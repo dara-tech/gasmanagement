@@ -1,9 +1,10 @@
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState, Suspense, useMemo, useRef, useCallback } from 'react';
 import { transactionsAPI, pumpsAPI, Transaction, Pump } from '../services/api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { useToast } from '../hooks/use-toast';
-import { FiSearch, FiFileText, FiTrash2 } from 'react-icons/fi';
+import { FiSearch, FiFileText, FiTrash2, FiCalendar } from 'react-icons/fi';
 import { ReceiptIcon, FuelPumpIcon } from '../components/icons';
 import { createLazyComponent } from '../utils/lazyLoad';
 import { InlineLoading, LoadingFallback } from '../components/LoadingFallback';
@@ -20,6 +21,30 @@ const TransactionDialog = createLazyComponent(() => import('../components/transa
 const DeleteTransactionDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.DeleteTransactionDialog })), 'DeleteTransactionDialog');
 const ReportDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.ReportDialog })), 'ReportDialog');
 const PrintPreviewDialog = createLazyComponent(() => import('../components/transactions').then(m => ({ default: m.PrintPreviewDialog })), 'PrintPreviewDialog');
+
+const calculateMetrics = (transactions: Transaction[]) => {
+  const totalSales = transactions.reduce((sum, t) => sum + t.total, 0);
+  const totalProfit = transactions.reduce((sum, t) => sum + (t.profit || 0), 0);
+  const totalLiters = transactions.reduce((sum, t) => sum + t.liters, 0);
+  const totalDiscounts = transactions.reduce((sum, t) => sum + (t.discount || 0), 0);
+  const totalCost = transactions.reduce((sum, t) => sum + ((t.priceIn || 0) * t.liters), 0);
+  const transactionCount = transactions.length;
+  const avgTransactionValue = transactionCount > 0 ? totalSales / transactionCount : 0;
+  const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+
+  return {
+    totalSales,
+    totalProfit,
+    totalLiters,
+    totalDiscounts,
+    totalCost,
+    transactionCount,
+    avgTransactionValue,
+    profitMargin,
+  };
+};
+
+type MetricsSummary = ReturnType<typeof calculateMetrics>;
 
 const Transactions: React.FC = () => {
   const { toast } = useToast();
@@ -42,9 +67,49 @@ const Transactions: React.FC = () => {
   const [previewHTML, setPreviewHTML] = useState('');
   const [pendingPDFGeneration, setPendingPDFGeneration] = useState<(() => void) | null>(null);
   
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'>('monthly');
+  const nowRef = useRef(new Date());
+  const [selectedYear, setSelectedYear] = useState(nowRef.current.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(nowRef.current.getMonth());
+
+  const monthOptions = useMemo(
+    () => [
+      { value: 0, label: 'មករា' },
+      { value: 1, label: 'កុម្ភៈ' },
+      { value: 2, label: 'មីនា' },
+      { value: 3, label: 'មេសា' },
+      { value: 4, label: 'ឧសភា' },
+      { value: 5, label: 'មិថុនា' },
+      { value: 6, label: 'កក្កដា' },
+      { value: 7, label: 'សីហា' },
+      { value: 8, label: 'កញ្ញា' },
+      { value: 9, label: 'តុលា' },
+      { value: 10, label: 'វិច្ឆិកា' },
+      { value: 11, label: 'ធ្នូ' },
+    ],
+    []
+  );
+
+  const yearOptions = useMemo(() => {
+    const currentYear = nowRef.current.getFullYear();
+    const years: number[] = [];
+    for (let offset = 0; offset < 6; offset += 1) {
+      years.push(currentYear - offset);
+    }
+    if (!years.includes(selectedYear)) {
+      years.unshift(selectedYear);
+    }
+    const uniqueYears: number[] = [];
+    years.forEach((year) => {
+      if (!uniqueYears.includes(year)) {
+        uniqueYears.push(year);
+      }
+    });
+    return uniqueYears.sort((a, b) => b - a);
+  }, [selectedYear]);
+  
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
-  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'>('daily');
   const [customDateRange, setCustomDateRange] = useState<{ from?: Date; to?: Date }>({});
   const [filterPump, setFilterPump] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
@@ -79,7 +144,7 @@ const Transactions: React.FC = () => {
       setSelectedIds(new Set());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, customDateRange, filterPump]);
+  }, [period, customDateRange, filterPump, selectedMonth, selectedYear]);
 
   // Fetch data when page or items per page changes
   useEffect(() => {
@@ -89,24 +154,47 @@ const Transactions: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, itemsPerPage]);
 
-  const fetchData = async (page: number = 1, overridePeriod?: typeof period, overrideDateRange?: typeof customDateRange) => {
+  const fetchData = async (page: number = 1) => {
     try {
       setLoading(true);
 
+      if (period === 'custom' && (!customDateRange.from || !customDateRange.to)) {
+        setLoading(false);
+        return;
+      }
+
       const filters: { startDate?: string; endDate?: string; pumpId?: string } = {};
-      
-      // Use override values if provided, otherwise use state values
-      const currentPeriod = overridePeriod !== undefined ? overridePeriod : period;
-      const currentDateRange = overrideDateRange !== undefined ? overrideDateRange : customDateRange;
-      
-      // Calculate date range based on period (same logic as Dashboard)
-      if (currentPeriod === 'custom' && currentDateRange.from && currentDateRange.to) {
-        filters.startDate = currentDateRange.from.toISOString().split('T')[0];
-        filters.endDate = currentDateRange.to.toISOString().split('T')[0];
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
+
+      if (period === 'custom') {
+        if (customDateRange.from && customDateRange.to) {
+          startDate = new Date(customDateRange.from);
+          startDate.setHours(0, 0, 0, 0);
+          endDate = new Date(customDateRange.to);
+          endDate.setHours(23, 59, 59, 999);
+        }
+      } else if (period === 'monthly') {
+        startDate = new Date(selectedYear, selectedMonth, 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(selectedYear, selectedMonth + 1, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (period === 'yearly') {
+        startDate = new Date(selectedYear, 0, 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(selectedYear, 11, 31);
+        endDate.setHours(23, 59, 59, 999);
       } else {
-        const range = getDateRange(currentPeriod);
-        filters.startDate = range.startDate.toISOString().split('T')[0];
-        filters.endDate = range.endDate.toISOString().split('T')[0];
+        const range = getDateRange(period);
+        startDate = range.startDate;
+        startDate.setHours(0, 0, 0, 0);
+        endDate = range.endDate;
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      if (startDate && endDate) {
+        filters.startDate = startDate.toISOString().split('T')[0];
+        filters.endDate = endDate.toISOString().split('T')[0];
       }
       
       if (filterPump && filterPump !== 'all') filters.pumpId = filterPump;
@@ -171,6 +259,43 @@ const Transactions: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const handlePeriodModeChange = (value: string) => {
+    if (value === 'custom') {
+      setPeriod('custom');
+      setShowFilters(true);
+      return;
+    }
+
+    const typedValue = value as 'monthly' | 'yearly';
+    setPeriod(typedValue);
+    setCustomDateRange({});
+
+    // Ensure month defaults to current when switching back to monthly
+    if (typedValue === 'monthly') {
+      setSelectedMonth((prev) => (Number.isInteger(prev) ? prev : nowRef.current.getMonth()));
+    }
+  };
+
+  const handleQuickAction = (action: 'thisMonth' | 'thisYear' | 'lastMonth' | 'lastYear') => {
+    const now = new Date();
+    if (action === 'thisMonth') {
+      setPeriod('monthly');
+      setSelectedMonth(now.getMonth());
+      setSelectedYear(now.getFullYear());
+    } else if (action === 'thisYear') {
+      setPeriod('yearly');
+      setSelectedYear(now.getFullYear());
+    } else if (action === 'lastMonth') {
+      setPeriod('monthly');
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      setSelectedMonth(lastMonth.getMonth());
+      setSelectedYear(lastMonth.getFullYear());
+    } else if (action === 'lastYear') {
+      setPeriod('yearly');
+      setSelectedYear(now.getFullYear() - 1);
+    }
+  };
+
   const handleOpenDialog = (transaction?: Transaction) => {
     setEditingTransaction(transaction || null);
     setDialogOpen(true);
@@ -197,8 +322,8 @@ const Transactions: React.FC = () => {
       setPagination(prev => prev ? { ...prev, total: prev.total + 1 } : null);
     } else {
       // If no transaction provided (e.g., update), just refresh
-      setCurrentPage(1);
-      fetchData(1);
+    setCurrentPage(1);
+    fetchData(1);
     }
   };
 
@@ -352,6 +477,13 @@ const Transactions: React.FC = () => {
     }).format(amount);
   };
 
+  const formatLiters = (amount: number) => {
+    return amount.toLocaleString('km-KH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const day = String(date.getDate()).padStart(2, '0');
@@ -403,6 +535,68 @@ const Transactions: React.FC = () => {
     
     return true;
   });
+
+  const pumpSummaries = useMemo(() => {
+    type Summary = {
+      pumpId: string;
+      pumpNumber: string;
+      fuelName: string;
+      totalLiters: number;
+      totalSales: number;
+      totalProfit: number;
+      totalDiscount: number;
+      transactionCount: number;
+    };
+
+    const map = new Map<string, Summary>();
+
+    filteredTransactions.forEach((transaction) => {
+      const pumpRef = typeof transaction.pumpId === 'object' ? transaction.pumpId : null;
+      const pumpId = pumpRef?._id || (typeof transaction.pumpId === 'string' ? transaction.pumpId : '');
+      if (!pumpId) return;
+
+      const pumpInfo = pumpRef || allPumps.find((p) => p._id === pumpId);
+      const fuelInfo = typeof transaction.fuelTypeId === 'object' ? transaction.fuelTypeId : (typeof pumpInfo?.fuelTypeId === 'object' ? pumpInfo.fuelTypeId : null);
+
+      if (!map.has(pumpId)) {
+        map.set(pumpId, {
+          pumpId,
+          pumpNumber: pumpInfo?.pumpNumber || pumpId,
+          fuelName: fuelInfo?.name || '—',
+          totalLiters: 0,
+          totalSales: 0,
+          totalProfit: 0,
+          totalDiscount: 0,
+          transactionCount: 0,
+        });
+      }
+
+      const summary = map.get(pumpId)!;
+      summary.totalLiters += transaction.liters;
+      summary.totalSales += transaction.total;
+      summary.totalProfit += transaction.profit || 0;
+      summary.totalDiscount += transaction.discount || 0;
+      summary.transactionCount += 1;
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.pumpNumber.localeCompare(b.pumpNumber, 'km-KH', { numeric: true }));
+  }, [filteredTransactions, allPumps]);
+
+  const pumpSummaryTotals = useMemo(() => {
+    return pumpSummaries.reduce(
+      (acc, item) => {
+        acc.totalLiters += item.totalLiters;
+        acc.totalSales += item.totalSales;
+        acc.totalProfit += item.totalProfit;
+        acc.totalDiscount += item.totalDiscount;
+        acc.transactionCount += item.transactionCount;
+        return acc;
+      },
+      { totalLiters: 0, totalSales: 0, totalProfit: 0, totalDiscount: 0, transactionCount: 0 }
+    );
+  }, [pumpSummaries]);
+
+  const periodSelectValue = period === 'monthly' || period === 'yearly' ? period : 'custom';
 
   // Group transactions by date for better organization
   const groupedTransactions = filteredTransactions.reduce((acc, transaction) => {
@@ -487,8 +681,12 @@ const Transactions: React.FC = () => {
     return { startDate, endDate };
   };
 
-  // Get transactions for a specific period (fetches all matching transactions from API)
-  const getTransactionsForPeriod = async (period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom', customRange?: { from?: Date; to?: Date }): Promise<Transaction[]> => {
+  const getTransactionsForPeriod = useCallback(
+    async (
+      period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom',
+      customRange?: { from?: Date; to?: Date },
+      pumpFilter?: string
+    ) => {
     let startDate: Date;
     let endDate: Date;
     
@@ -503,12 +701,10 @@ const Transactions: React.FC = () => {
       endDate = range.endDate;
     }
     
-    // Fetch all transactions for the period (with large limit to get all)
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
     
     try {
-      // Fetch all transactions for the period with a large limit
       let allPeriodTransactions: Transaction[] = [];
       let currentPage = 1;
       let hasMore = true;
@@ -516,7 +712,8 @@ const Transactions: React.FC = () => {
       while (hasMore) {
         const response = await transactionsAPI.getPaginated(currentPage, 1000, {
           startDate: startDateStr,
-          endDate: endDateStr
+            endDate: endDateStr,
+            ...(pumpFilter ? { pumpId: pumpFilter } : {}),
         });
         
         allPeriodTransactions = [...allPeriodTransactions, ...response.transactions];
@@ -527,36 +724,20 @@ const Transactions: React.FC = () => {
       return allPeriodTransactions;
     } catch (error) {
       console.error('Error fetching transactions for report:', error);
-      // Fallback to client-side filtering if API fails
-      return (transactions || []).filter(t => {
+        return (transactions || []).filter((t) => {
         const transactionDate = new Date(t.date);
+          if (pumpFilter && typeof t.pumpId === 'object' && t.pumpId._id && t.pumpId._id !== pumpFilter) {
+            return false;
+          }
+          if (pumpFilter && typeof t.pumpId === 'string' && t.pumpId !== pumpFilter) {
+            return false;
+          }
         return transactionDate >= startDate && transactionDate <= endDate;
       });
     }
-  };
-
-  // Calculate business metrics
-  const calculateMetrics = (transactions: Transaction[]) => {
-    const totalSales = transactions.reduce((sum, t) => sum + t.total, 0);
-    const totalProfit = transactions.reduce((sum, t) => sum + (t.profit || 0), 0);
-    const totalLiters = transactions.reduce((sum, t) => sum + t.liters, 0);
-    const totalDiscounts = transactions.reduce((sum, t) => sum + (t.discount || 0), 0);
-    const totalCost = transactions.reduce((sum, t) => sum + ((t.priceIn || 0) * t.liters), 0);
-    const transactionCount = transactions.length;
-    const avgTransactionValue = transactionCount > 0 ? totalSales / transactionCount : 0;
-    const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
-    
-    return {
-      totalSales,
-      totalProfit,
-      totalLiters,
-      totalDiscounts,
-      totalCost,
-      transactionCount,
-      avgTransactionValue,
-      profitMargin
-    };
-  };
+    },
+    [transactions]
+  );
 
   // Generate and export report
   const generateReport = async () => {
@@ -1133,9 +1314,11 @@ const Transactions: React.FC = () => {
   // Clear all filters
   const clearFilters = () => {
     setSearchQuery('');
-    setPeriod('daily');
+    setPeriod('monthly');
     setCustomDateRange({});
     setFilterPump('all');
+    setSelectedYear(nowRef.current.getFullYear());
+    setSelectedMonth(nowRef.current.getMonth());
   };
 
   // Get today's date in YYYY-MM-DD format
@@ -1152,13 +1335,14 @@ const Transactions: React.FC = () => {
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6 pb-24 md:pb-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
             <h1 className="text-xl md:text-3xl font-bold">ព័ត៌មានលក់</h1>
             <p className="text-xs md:text-base text-muted-foreground mt-0.5">គ្រប់គ្រងព័ត៌មានលក់សាំង</p>
           </div>
-          {/* Currency Selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs md:text-sm text-muted-foreground">រូបិយប៉ោយ</span>
           <Select value={currency} onValueChange={(value: 'USD' | 'KHR') => setCurrency(value)}>
             <SelectTrigger className="w-[100px] h-9 md:h-10 text-sm">
               <SelectValue />
@@ -1169,20 +1353,162 @@ const Transactions: React.FC = () => {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+        </div>
+
+        <Card className="bg-muted/30 border-dashed">
+          <CardContent className="p-4">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                {/* @ts-ignore */}
+                <FiCalendar className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold">ជ្រើសរយៈពេល</span>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground whitespace-nowrap">ប្រភេទ:</label>
+                  <Select value={periodSelectValue} onValueChange={handlePeriodModeChange}>
+                    <SelectTrigger className="w-[140px] h-9">
+                      <SelectValue placeholder="ជ្រើសរយៈពេល" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">តាមខែ</SelectItem>
+                      <SelectItem value="yearly">តាមឆ្នាំ</SelectItem>
+                      <SelectItem value="custom">ផ្ទាល់ខ្លួន</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {periodSelectValue === 'monthly' && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-muted-foreground whitespace-nowrap">ខែ:</label>
+                      <Select value={`${selectedMonth}`} onValueChange={(value) => setSelectedMonth(Number(value))}>
+                        <SelectTrigger className="w-[160px] h-9">
+                          <SelectValue placeholder="ជ្រើសខែ" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {monthOptions.map((month) => (
+                            <SelectItem key={month.value} value={`${month.value}`}>
+                              {month.label} {selectedYear}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-muted-foreground whitespace-nowrap">ឆ្នាំ:</label>
+                      <Select value={`${selectedYear}`} onValueChange={(value) => setSelectedYear(Number(value))}>
+                        <SelectTrigger className="w-[120px] h-9">
+                          <SelectValue placeholder="ឆ្នាំ" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {yearOptions.map((year) => (
+                            <SelectItem key={year} value={`${year}`}>
+                              {year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+
+                {periodSelectValue === 'yearly' && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground whitespace-nowrap">ឆ្នាំ:</label>
+                    <Select value={`${selectedYear}`} onValueChange={(value) => setSelectedYear(Number(value))}>
+                      <SelectTrigger className="w-[120px] h-9">
+                        <SelectValue placeholder="ជ្រើសឆ្នាំ" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {yearOptions.map((year) => (
+                          <SelectItem key={year} value={`${year}`}>
+                            ឆ្នាំ {year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-xs text-muted-foreground mr-2">រហ័ស:</span>
+                  <Button
+                    size="sm"
+                    variant={periodSelectValue === 'monthly' && selectedMonth === nowRef.current.getMonth() && selectedYear === nowRef.current.getFullYear() ? 'default' : 'outline'}
+                    onClick={() => handleQuickAction('thisMonth')}
+                    className="h-8 text-xs"
+                  >
+                    ខែនេះ
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={periodSelectValue === 'yearly' && selectedYear === nowRef.current.getFullYear() ? 'default' : 'outline'}
+                    onClick={() => handleQuickAction('thisYear')}
+                    className="h-8 text-xs"
+                  >
+                    ឆ្នាំនេះ
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleQuickAction('lastMonth')}
+                    className="h-8 text-xs"
+                  >
+                    ខែមុន
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleQuickAction('lastYear')}
+                    className="h-8 text-xs"
+                  >
+                    ឆ្នាំមុន
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:flex-1">
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ស្វែងរកតាមស្តុក ប្រភេទ សរុប..."
+                className="w-full sm:max-w-xs"
+              />
+              <Select value={filterPump} onValueChange={(value: string) => setFilterPump(value)}>
+                <SelectTrigger className="w-full sm:w-[200px]">
+                  <SelectValue placeholder="ស្តុកទាំងអស់" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ស្តុកទាំងអស់</SelectItem>
+                  {allPumps.map((pump) => (
+                    <SelectItem key={pump._id} value={pump._id}>
+                      {pump.pumpNumber} {typeof pump.fuelTypeId === 'object' ? `- ${pump.fuelTypeId.name}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
           {selectedIds.size > 0 && (
             <>
               <Button
                 variant="outline"
                 onClick={() => setSelectedIds(new Set())}
-                className="h-11 md:h-10 text-sm md:text-base"
+                    className="h-9 md:h-10 text-xs md:text-sm"
               >
                 លុបការជ្រើស
               </Button>
               <Button
                 variant="destructive"
                 onClick={() => setBulkDeleteDialogOpen(true)}
-                className="h-11 md:h-10 text-sm md:text-base"
+                    className="h-9 md:h-10 text-xs md:text-sm"
               >
                 {/* @ts-ignore */}
                 <FiTrash2 className="mr-2 h-4 w-4" />
@@ -1192,37 +1518,80 @@ const Transactions: React.FC = () => {
           )}
           <Button 
             variant="outline"
-            onClick={() => setShowFilters(!showFilters)}
-            className="h-11 md:h-10 text-sm md:text-base flex-1 md:flex-none"
-            size="lg"
-          >
-            {/* @ts-ignore */}
-            <FiSearch className="mr-2 h-4 w-4" />
-            ស្វែងរក
-          </Button>
-          <Button 
-            variant="outline"
             onClick={() => setReportDialogOpen(true)}
-            className="h-11 md:h-10 text-sm md:text-base flex-1 md:flex-none"
-            size="lg"
+                className="h-9 md:h-10 text-xs md:text-sm"
           >
             {/* @ts-ignore */}
             <FiFileText className="mr-2 h-4 w-4" />
-            <span className="hidden sm:inline">Report</span>
-            <span className="sm:hidden">Report</span>
+                Report
           </Button>
           <Button 
             onClick={() => handleOpenDialog()} 
             disabled={pumps.length === 0} 
-            className="w-full md:w-auto h-11 md:h-10 text-sm md:text-base"
-            size="lg"
+                className="h-9 md:h-10 text-xs md:text-sm"
           >
             <ReceiptIcon className="mr-2 h-4 w-4" />
-            <span className="hidden sm:inline">បន្ថែមព័ត៌មាន</span>
-            <span className="sm:hidden">បន្ថែម</span>
+                បន្ថែមព័ត៌មាន
           </Button>
         </div>
       </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-xs md:text-sm">
+              <thead className="bg-muted/60">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">ស្តុកសាំង</th>
+                  <th className="px-4 py-3 text-left font-semibold">ប្រភេទសាំង</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">ចំនួនព័ត៌មាន</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">បរិមាណ (លីត្រ)</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">សរុបលក់</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">បញ្ចុះតម្លៃ</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">ចំណេញ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pumpSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
+                      មិនមានទិន្នន័យសម្រាប់រយៈពេលនេះ
+                    </td>
+                  </tr>
+                ) : (
+                  pumpSummaries.map((summary) => (
+                    <tr key={summary.pumpId} className="border-t">
+                      <td className="px-4 py-3 font-medium">{summary.pumpNumber}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{summary.fuelName}</td>
+                      <td className="px-4 py-3 text-right font-mono">{summary.transactionCount.toLocaleString('km-KH')}</td>
+                      <td className="px-4 py-3 text-right font-mono">{`${formatLiters(summary.totalLiters)} L`}</td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold">{formatCurrency(summary.totalSales)}</td>
+                      <td className="px-4 py-3 text-right font-mono">{summary.totalDiscount > 0 ? formatCurrency(summary.totalDiscount) : '—'}</td>
+                      <td className={`px-4 py-3 text-right font-mono font-semibold ${summary.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(summary.totalProfit)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {pumpSummaries.length > 0 && (
+                <tfoot className="bg-muted/40">
+                  <tr className="font-semibold">
+                    <td className="px-4 py-3" colSpan={2}>សរុបរួម</td>
+                    <td className="px-4 py-3 text-right font-mono">{pumpSummaryTotals.transactionCount.toLocaleString('km-KH')}</td>
+                    <td className="px-4 py-3 text-right font-mono">{`${formatLiters(pumpSummaryTotals.totalLiters)} L`}</td>
+                    <td className="px-4 py-3 text-right font-mono">{formatCurrency(pumpSummaryTotals.totalSales)}</td>
+                    <td className="px-4 py-3 text-right font-mono">{pumpSummaryTotals.totalDiscount > 0 ? formatCurrency(pumpSummaryTotals.totalDiscount) : '—'}</td>
+                    <td className={`px-4 py-3 text-right font-mono ${pumpSummaryTotals.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(pumpSummaryTotals.totalProfit)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Search and Filter Panel */}
       {showFilters && (
@@ -1233,10 +1602,7 @@ const Transactions: React.FC = () => {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             period={period}
-            onPeriodChange={(p: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom') => {
-              setPeriod(p);
-              if (p !== 'custom') setCustomDateRange({});
-            }}
+            onPeriodChange={handlePeriodModeChange}
             customDateRange={customDateRange}
             onCustomDateRangeChange={setCustomDateRange}
             filterPump={filterPump}
@@ -1257,7 +1623,7 @@ const Transactions: React.FC = () => {
                 <FuelPumpIcon className="h-6 w-6 text-muted-foreground" />
               </div>
               <p className="text-muted-foreground text-sm md:text-base">
-                សូមបន្ថែមស្តុកសាំងសកម្មមុនពេលបន្ថែមព័ត៌មាន
+                សូមបន្ថែមស្តុកសកម្មមុនពេលបន្ថែមព័ត៌មាន
               </p>
             </div>
           </CardContent>
@@ -1327,7 +1693,7 @@ const Transactions: React.FC = () => {
           )}
           
           {/* Pagination */}
-          {pagination && pagination.totalPages > 1 && (
+          {pagination !== null && pagination.totalPages > 1 && (
             <div className="border-t p-4 md:p-6">
               <Pagination
                 currentPage={pagination.page}
@@ -1344,6 +1710,8 @@ const Transactions: React.FC = () => {
           )}
         </CardContent>
       </Card>
+      </div>
+
       {dialogOpen && (
         <Suspense fallback={null}>
           <TransactionDialog
